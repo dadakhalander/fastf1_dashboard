@@ -11,7 +11,6 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import warnings
 import os
-import sys
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -31,20 +30,46 @@ st.markdown("""
         background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
         color: #ffffff;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #FF1801 0%, #FF6B6B 100%);
-        padding: 20px;
-        border-radius: 10px;
-        color: white;
-        font-weight: bold;
-        margin: 5px;
+    .main-header {
+        background: linear-gradient(135deg, #FF1801 0%, #8B0000 100%);
+        padding: 2rem;
+        border-radius: 15px;
+        margin-bottom: 2rem;
+        text-align: center;
+        border: 2px solid #FF6B6B;
     }
     .prediction-card {
         background: linear-gradient(135deg, #2d2d44 0%, #3d3d5c 100%);
+        padding: 20px;
+        border-radius: 15px;
+        border-left: 5px solid #FF1801;
+        margin: 15px 0;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    .driver-card {
+        background: linear-gradient(135deg, #2d2d44 0%, #3d3d5c 100%);
+        padding: 20px;
+        border-radius: 15px;
+        border-left: 5px solid #0082FA;
+        margin: 15px 0;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    .constructor-card {
+        background: linear-gradient(135deg, #2d2d44 0%, #3d3d5c 100%);
+        padding: 20px;
+        border-radius: 15px;
+        border-left: 5px solid #FFD700;
+        margin: 15px 0;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    .metric-highlight {
+        background: linear-gradient(135deg, #FF1801 0%, #FF6B6B 100%);
         padding: 15px;
         border-radius: 10px;
-        border-left: 4px solid #FF1801;
-        margin: 10px 0;
+        text-align: center;
+        color: white;
+        font-weight: bold;
+        margin: 5px;
     }
     h1, h2, h3 {
         color: #FF1801;
@@ -54,171 +79,60 @@ st.markdown("""
         background-color: #2d2d44;
         color: white;
         border-radius: 10px;
-        padding: 10px 20px;
+        padding: 12px 24px;
         margin: 5px;
+        border: 1px solid #444;
     }
     .stTabs [aria-selected="true"] {
         background-color: #FF1801 !important;
-    }
-    .driver-card {
-        background: linear-gradient(135deg, #2d2d44 0%, #3d3d5c 100%);
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        border-left: 4px solid #0082FA;
-    }
-    .constructor-card {
-        background: linear-gradient(135deg, #2d2d44 0%, #3d3d5c 100%);
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        border-left: 4px solid #FFD700;
+        color: white !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# DEBUGGING - Check current directory and files
-# ============================================================================
-st.sidebar.markdown("### 🔍 Debug Info")
-try:
-    current_dir = os.getcwd()
-    st.sidebar.write(f"**Current dir:** {current_dir}")
-    
-    files = os.listdir('.')
-    st.sidebar.write(f"**Files:** {len(files)} items")
-    
-    if 'models' in files:
-        model_files = os.listdir('models')
-        st.sidebar.write(f"**Model files:** {len(model_files)} items")
-except Exception as e:
-    st.sidebar.error(f"Debug error: {e}")
-
-# ============================================================================
-# LOAD DATA & MODELS WITH COMPREHENSIVE ERROR HANDLING
+# LOAD DATA & MODELS
 # ============================================================================
 @st.cache_resource
 def load_all_resources():
-    """Load all data and models with enhanced error handling and path resolution"""
+    """Load all data and models"""
     resources = {}
     
     try:
-        st.sidebar.info("🔄 Loading resources...")
-        
-        # Try to load data files with multiple fallbacks
+        # Load data files
         data_files = {
-            'final_df': ['f1_dashboard.csv', 'data/f1_dashboard.csv', './f1_dashboard.csv'],
-            'driver_stats': ['driver_season_stats.csv', 'data/driver_season_stats.csv'],
-            'constructor_stats': ['constructor_season_stats.csv', 'data/constructor_season_stats.csv']
+            'final_df': 'f1_dashboard.csv',
+            'driver_stats': 'driver_season_stats.csv', 
+            'constructor_stats': 'constructor_season_stats.csv'
         }
         
-        for key, file_paths in data_files.items():
-            loaded = False
-            for file_path in file_paths:
-                if os.path.exists(file_path):
-                    try:
-                        resources[key] = pd.read_csv(file_path)
-                        st.sidebar.success(f"✅ {key} from {file_path}")
-                        loaded = True
-                        break
-                    except Exception as e:
-                        st.sidebar.warning(f"⚠️ Failed to load {key} from {file_path}: {e}")
-                        continue
-            
-            if not loaded:
-                st.sidebar.error(f"❌ Could not load {key} from any path: {file_paths}")
-                # Create empty DataFrame as fallback
-                resources[key] = pd.DataFrame()
+        for key, file_path in data_files.items():
+            if os.path.exists(file_path):
+                resources[key] = pd.read_csv(file_path)
+            else:
+                st.error(f"❌ Missing data file: {file_path}")
+                return None
         
-        # If no data files loaded, create minimal demo data
-        if all(len(resources[key]) == 0 for key in data_files.keys()):
-            st.sidebar.warning("📝 No data files found, creating demo data...")
-            resources['final_df'] = create_demo_data()
-            resources['driver_stats'] = pd.DataFrame()
-            resources['constructor_stats'] = pd.DataFrame()
+        # Define model base path
+        model_base = "models/f1_models_20251018_230123"
         
-        # Define model base path - try multiple possible locations
-        possible_paths = [
-            "models/f1_models_20251018_230123",
-            "./models/f1_models_20251018_230123", 
-            "../models/f1_models_20251018_230123",
-            "f1_models_20251018_230123",
-            "models",
-            "./models"
-        ]
-        
-        model_base = None
-        for path in possible_paths:
-            if os.path.exists(path):
-                model_base = path
-                st.sidebar.success(f"✅ Found models at: {path}")
-                break
-        
-        if model_base is None:
-            st.sidebar.warning("⚠️ Could not find model directory, using fallback models")
-            # Initialize with None values and continue
-            resources.update({
-                'scaler': None,
-                'feature_names': [],
-                'nn_winner': None,
-                'nn_podium': None,
-                'nn_points': None,
-                'rf_winner': None,
-                'gb_winner': None,
-                'rf_points': None,
-                'metadata': {},
-                'models_loaded': False
-            })
-            return resources
+        if not os.path.exists(model_base):
+            st.error(f"❌ Model directory not found: {model_base}")
+            return None
         
         # Load scalers and feature names
-        try:
-            scaler_path = f"{model_base}/scalers_encoders/feature_scaler.pkl"
-            feature_names_path = f"{model_base}/scalers_encoders/feature_names.pkl"
-            
-            if os.path.exists(scaler_path):
-                resources['scaler'] = joblib.load(scaler_path)
-                st.sidebar.success("✅ Loaded feature scaler")
-            else:
-                st.sidebar.warning("⚠️ Scaler not found")
-                resources['scaler'] = None
-                
-            if os.path.exists(feature_names_path):
-                resources['feature_names'] = joblib.load(feature_names_path)
-                st.sidebar.success("✅ Loaded feature names")
-            else:
-                st.sidebar.warning("⚠️ Feature names not found")
-                resources['feature_names'] = []
-                
-        except Exception as e:
-            st.sidebar.warning(f"⚠️ Error loading scalers: {e}")
-            resources['scaler'] = None
-            resources['feature_names'] = []
+        scaler_path = f"{model_base}/scalers_encoders/feature_scaler.pkl"
+        feature_names_path = f"{model_base}/scalers_encoders/feature_names.pkl"
         
-        # Load deep learning models
-        dl_models = {}
-        dl_models_to_load = {
-            'nn_winner': f"{model_base}/deep_learning/nn_winner_model.h5",
-            'nn_podium': f"{model_base}/deep_learning/nn_podium_model.h5", 
-            'nn_points': f"{model_base}/deep_learning/nn_points_model.h5"
-        }
-        
-        for model_name, model_path in dl_models_to_load.items():
-            if os.path.exists(model_path):
-                try:
-                    dl_models[model_name] = keras.models.load_model(model_path)
-                    st.sidebar.success(f"✅ Loaded {model_name}")
-                except Exception as e:
-                    st.sidebar.warning(f"⚠️ Could not load {model_name}: {e}")
-                    dl_models[model_name] = None
-            else:
-                st.sidebar.warning(f"⚠️ Model file not found: {model_path}")
-                dl_models[model_name] = None
-        
-        resources.update(dl_models)
+        if os.path.exists(scaler_path):
+            resources['scaler'] = joblib.load(scaler_path)
+            resources['feature_names'] = joblib.load(feature_names_path)
+        else:
+            st.error("❌ Scaler files not found")
+            return None
         
         # Load sklearn models
-        sk_models = {}
+        sklearn_models = {}
         sk_models_to_load = {
             'rf_winner': f"{model_base}/sklearn_models/rf_winner.pkl",
             'gb_winner': f"{model_base}/sklearn_models/gb_winner.pkl", 
@@ -227,465 +141,681 @@ def load_all_resources():
         
         for model_name, model_path in sk_models_to_load.items():
             if os.path.exists(model_path):
-                try:
-                    sk_models[model_name] = joblib.load(model_path)
-                    st.sidebar.success(f"✅ Loaded {model_name}")
-                except Exception as e:
-                    st.sidebar.error(f"❌ Error loading {model_name}: {e}")
-                    sk_models[model_name] = None
+                sklearn_models[model_name] = joblib.load(model_path)
             else:
-                st.sidebar.warning(f"⚠️ Model file not found: {model_path}")
-                sk_models[model_name] = None
+                st.error(f"❌ Model file not found: {model_path}")
+                return None
         
-        resources.update(sk_models)
+        resources.update(sklearn_models)
+        
+        # Try to load deep learning models (optional)
+        try:
+            nn_winner = keras.models.load_model(f"{model_base}/deep_learning/nn_winner_model.h5")
+            resources['nn_winner'] = nn_winner
+        except:
+            resources['nn_winner'] = None
+            
+        try:
+            nn_podium = keras.models.load_model(f"{model_base}/deep_learning/nn_podium_model.h5")
+            resources['nn_podium'] = nn_podium
+        except:
+            resources['nn_podium'] = None
+            
+        try:
+            nn_points = keras.models.load_model(f"{model_base}/deep_learning/nn_points_model.h5")
+            resources['nn_points'] = nn_points
+        except:
+            resources['nn_points'] = None
         
         # Load metadata
-        try:
-            metadata_path = f"{model_base}/metadata/model_metadata.pkl"
-            if os.path.exists(metadata_path):
-                resources['metadata'] = joblib.load(metadata_path)
-                st.sidebar.success("✅ Loaded metadata")
-            else:
-                resources['metadata'] = {}
-                st.sidebar.warning("⚠️ Metadata not found")
-        except Exception as e:
-            st.sidebar.warning(f"⚠️ Error loading metadata: {e}")
+        metadata_path = f"{model_base}/metadata/model_metadata.pkl"
+        if os.path.exists(metadata_path):
+            resources['metadata'] = joblib.load(metadata_path)
+        else:
             resources['metadata'] = {}
         
-        resources['models_loaded'] = any([
-            resources.get('nn_winner') is not None,
-            resources.get('rf_winner') is not None,
-            resources.get('gb_winner') is not None
-        ])
-        
-        st.sidebar.success("🎉 Resource loading completed!")
+        return resources
         
     except Exception as e:
-        st.sidebar.error(f"❌ Critical error in load_all_resources: {e}")
-        import traceback
-        st.sidebar.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Ensure we always return at least the basic structure
-        if 'final_df' not in resources:
-            resources['final_df'] = create_demo_data()
-        
-        # Set default values for missing resources
-        default_resources = {
-            'driver_stats': pd.DataFrame(),
-            'constructor_stats': pd.DataFrame(),
-            'scaler': None,
-            'feature_names': [],
-            'nn_winner': None,
-            'nn_podium': None,
-            'nn_points': None,
-            'rf_winner': None,
-            'gb_winner': None,
-            'rf_points': None,
-            'metadata': {},
-            'models_loaded': False
+        st.error(f"❌ Error loading resources: {str(e)}")
+        return None
+
+# Initialize resources
+resources = load_all_resources()
+
+if resources is None:
+    st.error("🚨 Failed to load required resources. Please check your data and model files.")
+    st.stop()
+
+# Extract resources
+final_df = resources['final_df']
+driver_stats = resources['driver_stats']
+constructor_stats = resources['constructor_stats']
+scaler = resources['scaler']
+feature_names = resources['feature_names']
+rf_winner = resources['rf_winner']
+gb_winner = resources['gb_winner']
+rf_points = resources['rf_points']
+nn_winner = resources.get('nn_winner')
+nn_podium = resources.get('nn_podium')
+nn_points = resources.get('nn_points')
+metadata = resources['metadata']
+
+# Data preprocessing
+final_df['raceDate'] = pd.to_datetime(final_df['raceDate'])
+final_df['year'] = final_df['year'].astype(int)
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+def create_prediction_features(grid_position, qual_position, pit_stops, avg_lap_time, 
+                              lap_time_consistency, pit_stop_duration, driver_wins, 
+                              driver_podiums, driver_points, constructor_wins, 
+                              constructor_points, finish_rate):
+    """Create feature array for model prediction"""
+    features = np.array([[
+        grid_position, qual_position, grid_position - qual_position, 
+        qual_position - grid_position, avg_lap_time, lap_time_consistency, 
+        pit_stops, pit_stop_duration, 0,
+        driver_points, driver_wins, driver_podiums, finish_rate,
+        driver_points/10, 0,
+        driver_wins/2, driver_podiums/2, driver_points*0.8,
+        constructor_points, constructor_wins, finish_rate,
+        finish_rate*0.9
+    ]])
+    return features
+
+def make_predictions(X_new, use_nn=True, use_rf=True, use_gb=True):
+    """Make predictions using selected models"""
+    predictions = {}
+    X_scaled = scaler.transform(X_new)
+    
+    if use_nn and nn_winner is not None:
+        try:
+            pred_nn_win = nn_winner.predict(X_scaled, verbose=0)[0][0]
+            pred_nn_podium = nn_podium.predict(X_scaled, verbose=0)[0][0] if nn_podium else pred_nn_win * 0.7
+            pred_nn_points = nn_points.predict(X_scaled, verbose=0)[0][0] if nn_points else pred_nn_win * 25
+            predictions['Neural Network'] = {
+                'win': pred_nn_win,
+                'podium': pred_nn_podium,
+                'points': pred_nn_points
+            }
+        except:
+            pass
+    
+    if use_rf:
+        pred_rf_win = rf_winner.predict_proba(X_new)[0][1]
+        pred_rf_points = rf_points.predict(X_new)[0]
+        predictions['Random Forest'] = {
+            'win': pred_rf_win,
+            'podium': pred_rf_win * 0.7,
+            'points': pred_rf_points
         }
-        
-        for key, value in default_resources.items():
-            if key not in resources:
-                resources[key] = value
     
-    return resources
+    if use_gb:
+        pred_gb_win = gb_winner.predict_proba(X_new)[0][1]
+        pred_gb_points = pred_gb_win * 25
+        predictions['Gradient Boosting'] = {
+            'win': pred_gb_win,
+            'podium': pred_gb_win * 0.7,
+            'points': pred_gb_points
+        }
+    
+    return predictions
 
-def create_demo_data():
-    """Create demo data when no CSV files are available"""
-    st.sidebar.info("📊 Creating demo data...")
-    return pd.DataFrame({
-        'raceId': [1, 2, 3],
-        'year': [2023, 2023, 2023],
-        'driverRef': ['demo_driver1', 'demo_driver2', 'demo_driver3'],
-        'constructorRef': ['demo_team1', 'demo_team2', 'demo_team1'],
-        'grid': [1, 2, 3],
-        'positionOrder': [1, 2, 3],
-        'points': [25, 18, 15],
-        'isWin': [1, 0, 0],
-        'isPodium': [1, 1, 1],
-        'isFinished': [1, 1, 1],
-        'isDNF': [0, 0, 0],
-        'raceName': ['Demo Race 1', 'Demo Race 2', 'Demo Race 3'],
-        'circuitName': ['Demo Circuit', 'Demo Circuit', 'Demo Circuit'],
-        'raceDate': pd.to_datetime(['2023-01-01', '2023-02-01', '2023-03-01'])
-    })
-
-# ============================================================================
-# INITIALIZE RESOURCES
-# ============================================================================
-try:
-    resources = load_all_resources()
+def calculate_ensemble_predictions(predictions):
+    """Calculate ensemble predictions from multiple models"""
+    if not predictions:
+        return None
     
-    # Extract resources with safe defaults
-    final_df = resources.get('final_df', create_demo_data())
-    driver_stats = resources.get('driver_stats', pd.DataFrame())
-    constructor_stats = resources.get('constructor_stats', pd.DataFrame())
-    scaler = resources.get('scaler', None)
-    feature_names = resources.get('feature_names', [])
-    nn_winner = resources.get('nn_winner', None)
-    nn_podium = resources.get('nn_podium', None)
-    nn_points = resources.get('nn_points', None)
-    rf_winner = resources.get('rf_winner', None)
-    gb_winner = resources.get('gb_winner', None)
-    rf_points = resources.get('rf_points', None)
-    metadata = resources.get('metadata', {})
-    models_loaded = resources.get('models_loaded', False)
+    ensemble_win = np.mean([predictions[m]['win'] for m in predictions])
+    ensemble_podium = np.mean([predictions[m]['podium'] for m in predictions])
+    ensemble_points = np.mean([predictions[m]['points'] for m in predictions])
     
-    # Convert date column if it exists
-    if 'raceDate' in final_df.columns:
-        final_df['raceDate'] = pd.to_datetime(final_df['raceDate'])
-    if 'year' in final_df.columns:
-        final_df['year'] = final_df['year'].astype(int)
-    
-except Exception as e:
-    st.error(f"❌ Failed to initialize resources: {e}")
-    # Create minimal demo data to prevent crashes
-    final_df = create_demo_data()
-    driver_stats = pd.DataFrame()
-    constructor_stats = pd.DataFrame()
-    scaler = None
-    feature_names = []
-    nn_winner = nn_podium = nn_points = None
-    rf_winner = gb_winner = rf_points = None
-    metadata = {}
-    models_loaded = False
+    return {
+        'win': ensemble_win,
+        'podium': ensemble_podium,
+        'points': ensemble_points
+    }
 
 # ============================================================================
 # SIDEBAR NAVIGATION
 # ============================================================================
-st.sidebar.markdown("# 🏎️ F1 PREDICTION DASHBOARD")
-st.sidebar.markdown("### Advanced Analytics & ML Models")
+st.sidebar.markdown("""
+<div style='text-align: center;'>
+    <h1>🏎️ F1 PREDICTOR</h1>
+    <p><em>Advanced Race Analytics</em></p>
+</div>
+""", unsafe_allow_html=True)
+
 st.sidebar.markdown("---")
 
 # Navigation menu
 page = st.sidebar.radio(
-    "📍 SELECT PAGE:",
+    "**NAVIGATION**",
     [
-        "🏠 Dashboard Overview",
-        "📊 Data Analysis",
-        "🎯 Race Predictor", 
-        "👥 Driver Analysis",
-        "🔮 Advanced Insights"
+        "🏠 Dashboard",
+        "📊 Race Predictor", 
+        "👥 Drivers",
+        "🏭 Constructors",
+        "📈 Analytics",
+        "🏆 Championships"
     ],
     key="page_navigation"
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📋 Quick Stats")
+st.sidebar.markdown("### 📊 QUICK STATS")
 
-# Safe metrics calculation
-try:
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        races = final_df['raceId'].nunique() if 'raceId' in final_df.columns else 0
-        st.metric("Races", races)
-    with col2:
-        drivers = final_df['driverRef'].nunique() if 'driverRef' in final_df.columns else 0
-        st.metric("Drivers", drivers)
-    
-    if 'year' in final_df.columns:
-        latest_season = final_df['year'].max()
-        recent_races = final_df[final_df['year'] == latest_season]['raceId'].nunique() if 'raceId' in final_df.columns else 0
-        st.sidebar.metric(f"Races ({int(latest_season)})", recent_races)
-    else:
-        st.sidebar.metric("Latest Season", "N/A")
+# Calculate key metrics
+total_races = final_df['raceId'].nunique()
+total_drivers = final_df['driverRef'].nunique()
+latest_season = final_df['year'].max()
+current_drivers = final_df[final_df['year'] == latest_season]['driverRef'].nunique()
 
-except Exception as e:
-    st.sidebar.error("Error calculating stats")
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    st.metric("Total Races", f"{total_races:,}")
+with col2:
+    st.metric("Total Drivers", total_drivers)
+
+st.sidebar.metric(f"Active Drivers ({latest_season})", current_drivers)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔧 Model Status")
-st.sidebar.write(f"Models Loaded: {'✅' if models_loaded else '❌'}")
+st.sidebar.markdown("### 🎯 MODEL STATUS")
+models_loaded = sum([nn_winner is not None, rf_winner is not None, gb_winner is not None])
+st.sidebar.write(f"**Active Models:** {models_loaded}/3")
 
 # ============================================================================
-# DASHBOARD OVERVIEW PAGE
+# DASHBOARD PAGE
 # ============================================================================
-if page == "🏠 Dashboard Overview":
-    col1, col2 = st.columns([2, 1])
+if page == "🏠 Dashboard":
+    # Header Section
+    st.markdown("""
+    <div class='main-header'>
+        <h1>FORMULA 1 PREDICTION DASHBOARD</h1>
+        <h3>AI-Powered Race Analytics & Predictions</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Key Metrics Row
+    st.markdown("## 🏆 SEASON OVERVIEW")
+    
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown("# 🏎️ Formula 1 Prediction Dashboard")
-        st.markdown("""
-        Welcome to the **Advanced F1 Prediction Dashboard** powered by machine learning and deep learning models.
-        
-        **Key Features:**
-        - 🎯 **Race Outcome Predictions** - Win probability, podium chances, and expected points
-        - 📊 **Comprehensive Analytics** - Historical data analysis and performance trends  
-        - 🤖 **Multiple ML Models** - Neural Networks, Random Forest, Gradient Boosting
-        - 🔮 **Advanced Insights** - Grid analysis, driver form, championship predictions
-        """)
+        total_wins = final_df['isWin'].sum()
+        st.markdown(f"""
+        <div class='metric-highlight'>
+            <div style='font-size: 24px;'>🏆</div>
+            <div>Total Wins</div>
+            <div style='font-size: 28px;'>{int(total_wins):,}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        if 'year' in final_df.columns:
-            latest_season = final_df['year'].max()
-            st.metric("Latest Season", int(latest_season))
-        else:
-            st.metric("Latest Season", "N/A")
-        
-        st.metric("Active Models", "3" if models_loaded else "0")
-        st.metric("Prediction Accuracy", "85%+" if models_loaded else "N/A")
+        total_points = final_df['points'].sum()
+        st.markdown(f"""
+        <div class='metric-highlight'>
+            <div style='font-size: 24px;'>💰</div>
+            <div>Points Scored</div>
+            <div style='font-size: 28px;'>{int(total_points):,}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        podium_finishes = final_df['isPodium'].sum()
+        st.markdown(f"""
+        <div class='metric-highlight'>
+            <div style='font-size: 24px;'>🥇</div>
+            <div>Podium Finishes</div>
+            <div style='font-size: 28px;'>{int(podium_finishes):,}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        finish_rate = (final_df['isFinished'].sum() / len(final_df)) * 100
+        st.markdown(f"""
+        <div class='metric-highlight'>
+            <div style='font-size: 24px;'>✅</div>
+            <div>Finish Rate</div>
+            <div style='font-size: 28px;'>{finish_rate:.1f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Key metrics dashboard
-    st.markdown("## 📊 Key Performance Indicators")
+    # Current Season Highlights
+    st.markdown("## 📈 CURRENT SEASON HIGHLIGHTS")
     
-    try:
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            total_wins = final_df['isWin'].sum() if 'isWin' in final_df.columns else 0
-            st.metric("Total Wins Recorded", f"{total_wins:,}")
-        
-        with col2:
-            total_points = final_df['points'].sum() if 'points' in final_df.columns else 0
-            st.metric("Total Points Scored", f"{total_points:,.0f}")
-        
-        with col3:
-            if 'points' in final_df.columns and len(final_df[final_df['points'] > 0]) > 0:
-                avg_points = final_df[final_df['points'] > 0]['points'].mean()
-                st.metric("Avg Points/Race", f"{avg_points:.1f}")
-            else:
-                st.metric("Avg Points/Race", "N/A")
-        
-        with col4:
-            if 'isFinished' in final_df.columns and len(final_df) > 0:
-                finish_rate = (final_df['isFinished'].sum() / len(final_df) * 100)
-                st.metric("Overall Finish Rate", f"{finish_rate:.1f}%")
-            else:
-                st.metric("Overall Finish Rate", "N/A")
+    current_season = final_df[final_df['year'] == latest_season]
     
-    except Exception as e:
-        st.error("Error displaying metrics")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Current Championship Standings
+        championship = current_season.groupby('driverRef').agg({
+            'points': 'sum',
+            'isWin': 'sum',
+            'isPodium': 'sum'
+        }).sort_values('points', ascending=False).head(10)
+        
+        st.markdown("### 🏆 Championship Standings")
+        for i, (driver, data) in enumerate(championship.head(5).iterrows(), 1):
+            emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🏁"
+            st.write(f"{emoji} **{driver}** - {int(data['points'])} pts ({int(data['isWin'])} wins)")
+    
+    with col2:
+        # Recent Race Winners
+        recent_races = current_season.sort_values('raceDate', ascending=False).head(5)
+        st.markdown("### 🏁 Recent Race Winners")
+        for _, race in recent_races.iterrows():
+            if race['isWin'] == 1:
+                st.write(f"🏆 **{race['driverRef']}** - {race['raceName']}")
     
     st.markdown("---")
     
-    # Top performers section
-    try:
-        if 'driverRef' in final_df.columns and 'isWin' in final_df.columns:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### 🏆 Top Drivers (All Time Wins)")
-                top_drivers = final_df[final_df['isWin'] == 1].groupby('driverRef').size().sort_values(ascending=False).head(10)
-                
-                if len(top_drivers) > 0:
-                    fig = px.bar(x=top_drivers.values, y=top_drivers.index, orientation='h',
-                                 color=top_drivers.values, color_continuous_scale='Reds',
-                                 labels={'x': 'Wins', 'y': 'Driver'})
-                    fig.update_layout(template='plotly_dark', height=400, showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No win data available")
-            
-            with col2:
-                st.markdown("### 📈 Recent Season Performance")
-                if 'year' in final_df.columns and 'points' in final_df.columns:
-                    recent_year = final_df['year'].max()
-                    recent_data = final_df[final_df['year'] == recent_year]
-                    top_current = recent_data.groupby('driverRef')['points'].sum().sort_values(ascending=False).head(10)
-                    
-                    if len(top_current) > 0:
-                        fig = px.bar(x=top_current.values, y=top_current.index, orientation='h',
-                                     color=top_current.values, color_continuous_scale='Viridis',
-                                     labels={'x': 'Points', 'y': 'Driver'})
-                        fig.update_layout(template='plotly_dark', height=400, showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("No recent season data")
-                else:
-                    st.info("Season data not available")
-        else:
-            st.info("Driver data not available for visualization")
+    # Performance Charts
+    col1, col2 = st.columns(2)
     
-    except Exception as e:
-        st.error("Error creating visualizations")
-
-# ============================================================================
-# DATA ANALYSIS PAGE
-# ============================================================================
-elif page == "📊 Data Analysis":
-    st.markdown("# 📊 F1 Data Analysis & Trends")
+    with col1:
+        # Top Drivers All-Time
+        top_drivers = final_df.groupby('driverRef').agg({
+            'isWin': 'sum',
+            'points': 'sum'
+        }).nlargest(10, 'isWin')
+        
+        fig = px.bar(top_drivers, x='isWin', y=top_drivers.index, orientation='h',
+                    title="🏆 All-Time Wins Leaders",
+                    color='isWin', color_continuous_scale='Reds')
+        fig.update_layout(template='plotly_dark', height=400, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
     
-    try:
-        tab1, tab2, tab3 = st.tabs(["📈 Races", "🎯 Results", "💰 Points"])
+    with col2:
+        # Constructor Performance
+        top_constructors = final_df.groupby('constructorRef').agg({
+            'isWin': 'sum',
+            'points': 'sum'
+        }).nlargest(10, 'points')
         
-        with tab1:
-            st.subheader("Races Per Season")
-            if 'year' in final_df.columns and 'raceId' in final_df.columns:
-                races_by_year = final_df.groupby('year')['raceId'].nunique()
-                
-                fig = px.bar(x=races_by_year.index, y=races_by_year.values,
-                             labels={'x': 'Year', 'y': 'Number of Races'},
-                             color_discrete_sequence=['#FF1801'],
-                             title="F1 Races Per Season")
-                fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Race data not available")
-        
-        with tab2:
-            st.subheader("Result Distribution")
-            if all(col in final_df.columns for col in ['isWin', 'isPodium', 'isFinished', 'isDNF']):
-                results_dist = pd.DataFrame({
-                    'Category': ['Wins', 'Podiums', 'Finishes', 'DNF'],
-                    'Count': [final_df['isWin'].sum(), final_df['isPodium'].sum(), 
-                             final_df['isFinished'].sum(), final_df['isDNF'].sum()]
-                })
-                
-                fig = px.pie(results_dist, values='Count', names='Category',
-                             color_discrete_sequence=['#FFD700', '#C0C0C0', '#CD7F32', '#FF6B6B'],
-                             title="Race Results Distribution")
-                fig.update_layout(template='plotly_dark', height=450)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Result data not available")
-        
-        with tab3:
-            st.subheader("Points Distribution")
-            if 'points' in final_df.columns:
-                points_data = final_df[final_df['points'] > 0]['points'].value_counts().sort_index(ascending=False).head(15)
-                
-                if len(points_data) > 0:
-                    fig = px.bar(x=points_data.values, y=points_data.index,
-                                 orientation='h', color_discrete_sequence=['#0082FA'],
-                                 labels={'x': 'Frequency', 'y': 'Points'},
-                                 title="Top 15 Points Distributions")
-                    fig.update_layout(template='plotly_dark', height=450)
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No points data available")
-            else:
-                st.info("Points data not available")
-    
-    except Exception as e:
-        st.error("Error in data analysis")
+        fig = px.bar(top_constructors, x='points', y=top_constructors.index, orientation='h',
+                    title="🏭 All-Time Points Leaders",
+                    color='points', color_continuous_scale='Blues')
+        fig.update_layout(template='plotly_dark', height=400, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================================
 # RACE PREDICTOR PAGE
 # ============================================================================
-elif page == "🎯 Race Predictor":
-    st.markdown("# 🎯 Single Race Prediction Engine")
+elif page == "📊 Race Predictor":
+    st.markdown("""
+    <div class='main-header'>
+        <h1>RACE PREDICTION ENGINE</h1>
+        <h3>AI-Powered Race Outcome Predictions</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    if not models_loaded:
-        st.warning("""
-        ⚠️ **Models not fully loaded** 
-        
-        The prediction engine requires trained machine learning models. Please ensure:
-        - Model files are in the correct directory structure
-        - All required .h5 and .pkl files are present
-        - File paths are accessible
-        
-        Currently running in demo mode with limited functionality.
-        """)
+    st.markdown("""
+    <div class='prediction-card'>
+        <h3>🎯 Predict Race Outcomes</h3>
+        <p>Enter race conditions and driver statistics to get AI-powered predictions for win probability, 
+        podium chances, and expected points.</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    st.info("📌 Enter driver and race conditions to predict outcomes using ML models")
+    # Input Section
+    col1, col2 = st.columns([2, 1])
     
-    # Simple input form for demo
-    with st.form("prediction_form"):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            grid_position = st.slider("Grid Position", 1, 20, 5)
-        
-        with col2:
-            qual_position = st.slider("Qualifying Position", 1, 20, 6)
-        
-        with col3:
-            driver_experience = st.slider("Driver Experience", 1, 20, 8)
-        
-        submitted = st.form_submit_button("🚀 Generate Predictions")
-    
-    if submitted:
-        if models_loaded:
-            st.success("✅ Models loaded - generating predictions...")
-            # Add your prediction logic here when models are available
-        else:
-            st.warning("🔶 Demo Mode - Using simulated predictions")
+    with col1:
+        with st.container():
+            st.markdown("### 🏁 Race Conditions")
             
-            # Demo predictions
+            col1a, col2a, col3a = st.columns(3)
+            with col1a:
+                grid_position = st.slider("Starting Grid", 1, 20, 5, help="Driver's starting position")
+            with col2a:
+                qual_position = st.slider("Qualifying Position", 1, 20, 3, help="Position in qualifying session")
+            with col3a:
+                pit_stops = st.slider("Planned Pit Stops", 0, 5, 2, help="Number of planned pit stops")
+            
+            st.markdown("### ⏱️ Performance Metrics")
+            col1b, col2b, col3b = st.columns(3)
+            with col1b:
+                avg_lap_time = st.number_input("Avg Lap Time (ms)", 80000, 120000, 90000)
+            with col2b:
+                lap_time_consistency = st.slider("Lap Consistency", 100, 2000, 500, help="Lower = more consistent")
+            with col3b:
+                pit_stop_duration = st.slider("Pit Stop Time (s)", 18.0, 35.0, 22.5, 0.5)
+    
+    with col2:
+        with st.container():
+            st.markdown("### 👤 Driver Profile")
+            
+            driver_wins = st.number_input("Career Wins", 0, 103, 15)
+            driver_podiums = st.number_input("Career Podiums", 0, 200, 45)
+            driver_points = st.number_input("Season Points", 0, 500, 180)
+            
+            st.markdown("### 🏭 Team Profile")
+            constructor_wins = st.number_input("Team Wins", 0, 250, 80)
+            constructor_points = st.number_input("Team Points", 0, 1000, 350)
+            finish_rate = st.slider("Finish Rate %", 50.0, 100.0, 85.0, 1.0)
+    
+    # Model Selection
+    st.markdown("### 🤖 Prediction Models")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        use_rf = st.checkbox("Random Forest", True)
+    with col2:
+        use_gb = st.checkbox("Gradient Boosting", True)
+    with col3:
+        use_nn = st.checkbox("Neural Network", nn_winner is not None, disabled=nn_winner is None)
+    
+    # Prediction Button
+    if st.button("🚀 GENERATE PREDICTIONS", use_container_width=True, type="primary"):
+        with st.spinner("🤖 Analyzing race conditions..."):
+            # Create features and make predictions
+            X_new = create_prediction_features(
+                grid_position, qual_position, pit_stops, avg_lap_time,
+                lap_time_consistency, pit_stop_duration, driver_wins,
+                driver_podiums, driver_points, constructor_wins,
+                constructor_points, finish_rate
+            )
+            
+            predictions = make_predictions(X_new, use_nn, use_rf, use_gb)
+            ensemble = calculate_ensemble_predictions(predictions)
+        
+        # Display Results
+        if ensemble:
+            st.markdown("---")
+            st.markdown("## 📊 PREDICTION RESULTS")
+            
+            # Main Metrics
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                win_prob = max(0.1, 0.5 - (grid_position - 1) * 0.05)
-                st.metric("🏆 Win Probability", f"{win_prob:.1%}")
+                win_color = "normal" if ensemble['win'] > 0.3 else "off"
+                st.metric("🏆 WIN PROBABILITY", f"{ensemble['win']:.1%}", 
+                         delta=f"{(ensemble['win']-0.1)*100:+.1f}%", delta_color=win_color)
             
             with col2:
-                podium_prob = max(0.2, 0.7 - (grid_position - 1) * 0.04)
-                st.metric("🥇 Podium Probability", f"{podium_prob:.1%}")
+                podium_color = "normal" if ensemble['podium'] > 0.4 else "off"
+                st.metric("🥇 PODIUM CHANCE", f"{ensemble['podium']:.1%}", delta_color=podium_color)
             
             with col3:
-                expected_points = max(2, 18 - (grid_position - 1) * 1.2)
-                st.metric("📊 Expected Points", f"{expected_points:.1f}")
-
-# ============================================================================
-# DRIVER ANALYSIS PAGE
-# ============================================================================
-elif page == "👥 Driver Analysis":
-    st.markdown("# 👥 Driver Performance Analysis")
-    
-    try:
-        if 'driverRef' in final_df.columns:
-            driver_list = sorted(final_df['driverRef'].unique())
-            selected_driver = st.selectbox("🏎️ Select Driver", driver_list)
+                points_color = "normal" if ensemble['points'] > 10 else "off"
+                st.metric("💰 EXPECTED POINTS", f"{ensemble['points']:.1f}", delta_color=points_color)
             
-            if selected_driver:
-                driver_data = final_df[final_df['driverRef'] == selected_driver]
+            # Model Comparison
+            st.markdown("### 📈 Model Consensus")
+            if predictions:
+                model_data = []
+                for model_name, preds in predictions.items():
+                    model_data.append({
+                        'Model': model_name,
+                        'Win %': preds['win'] * 100,
+                        'Podium %': preds['podium'] * 100,
+                        'Points': preds['points']
+                    })
                 
-                if len(driver_data) > 0:
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        total_wins = driver_data['isWin'].sum() if 'isWin' in driver_data.columns else 0
-                        st.metric("🏆 Total Wins", int(total_wins))
-                    
-                    with col2:
-                        total_podiums = driver_data['isPodium'].sum() if 'isPodium' in driver_data.columns else 0
-                        st.metric("🥇 Total Podiums", int(total_podiums))
-                    
-                    with col3:
-                        total_points = driver_data['points'].sum() if 'points' in driver_data.columns else 0
-                        st.metric("💰 Total Points", int(total_points))
-                    
-                    with col4:
-                        seasons = driver_data['year'].nunique() if 'year' in driver_data.columns else 0
-                        st.metric("📅 Seasons", seasons)
-                else:
-                    st.info(f"No data found for driver: {selected_driver}")
-        else:
-            st.info("Driver data not available")
-    
-    except Exception as e:
-        st.error("Error in driver analysis")
+                df_comparison = pd.DataFrame(model_data)
+                st.dataframe(df_comparison.style.format({
+                    'Win %': '{:.1f}%',
+                    'Podium %': '{:.1f}%',
+                    'Points': '{:.1f}'
+                }), use_container_width=True)
+            
+            # Strategy Recommendations
+            st.markdown("### 💡 Race Strategy Advice")
+            if ensemble['win'] > 0.6:
+                st.success("**AGGRESSIVE STRATEGY** - High win probability suggests going for victory with bold tire choices and aggressive overtaking.")
+            elif ensemble['podium'] > 0.5:
+                st.warning("**BALANCED APPROACH** - Strong podium chances suggest focusing on consistent pace and strategic pit stops.")
+            else:
+                st.info("**POINTS FOCUS** - Target points finish with conservative strategy and tire management.")
 
 # ============================================================================
-# ADVANCED INSIGHTS PAGE
+# DRIVERS PAGE
 # ============================================================================
-elif page == "🔮 Advanced Insights":
-    st.markdown("# 🔮 Advanced Insights")
+elif page == "👥 Drivers":
+    st.markdown("""
+    <div class='main-header'>
+        <h1>DRIVER ANALYSIS</h1>
+        <h3>Comprehensive Driver Performance & Statistics</h3>
+    </div>
+    """, unsafe_allow_html=True)
     
-    try:
-        if len(final_df) > 0 and 'grid' in final_df.columns and 'points' in final_df.columns:
-            st.subheader("Grid Position Analysis")
-            
-            grid_analysis = final_df.groupby('grid').agg({
-                'points': 'mean',
+    # All drivers across all seasons
+    all_drivers = sorted(final_df['driverRef'].unique())
+    selected_driver = st.selectbox("🎯 SELECT DRIVER", all_drivers)
+    
+    if selected_driver:
+        driver_data = final_df[final_df['driverRef'] == selected_driver]
+        
+        # Driver Overview
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_wins = driver_data['isWin'].sum()
+            st.metric("🏆 Career Wins", int(total_wins))
+        
+        with col2:
+            total_podiums = driver_data['isPodium'].sum()
+            st.metric("🥇 Career Podiums", int(total_podiums))
+        
+        with col3:
+            total_points = driver_data['points'].sum()
+            st.metric("💰 Career Points", int(total_points))
+        
+        with col4:
+            total_races = len(driver_data)
+            st.metric("🏁 Races Entered", total_races)
+        
+        st.markdown("---")
+        
+        # Performance Analysis
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Wins by Season
+            wins_by_season = driver_data.groupby('year')['isWin'].sum()
+            if len(wins_by_season) > 0:
+                fig = px.line(x=wins_by_season.index, y=wins_by_season.values,
+                             title=f"🏆 Wins by Season - {selected_driver}",
+                             labels={'x': 'Season', 'y': 'Wins'})
+                fig.update_layout(template='plotly_dark', height=300)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Points by Season
+            points_by_season = driver_data.groupby('year')['points'].sum()
+            if len(points_by_season) > 0:
+                fig = px.bar(x=points_by_season.index, y=points_by_season.values,
+                            title=f"💰 Points by Season - {selected_driver}",
+                            color=points_by_season.values,
+                            color_continuous_scale='Viridis')
+                fig.update_layout(template='plotly_dark', height=300)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Recent Performance
+        st.markdown("### 🏁 Recent Race Performance")
+        recent_races = driver_data.sort_values('raceDate', ascending=False).head(10)[
+            ['year', 'raceName', 'grid', 'positionOrder', 'points', 'isWin', 'isPodium']
+        ]
+        st.dataframe(recent_races, use_container_width=True)
+
+# ============================================================================
+# CONSTRUCTORS PAGE
+# ============================================================================
+elif page == "🏭 Constructors":
+    st.markdown("""
+    <div class='main-header'>
+        <h1>CONSTRUCTOR ANALYSIS</h1>
+        <h3>Team Performance & Championship History</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    all_constructors = sorted(final_df['constructorRef'].unique())
+    selected_constructor = st.selectbox("🏭 SELECT TEAM", all_constructors)
+    
+    if selected_constructor:
+        team_data = final_df[final_df['constructorRef'] == selected_constructor]
+        
+        # Team Overview
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            team_wins = team_data['isWin'].sum()
+            st.metric("🏆 Team Wins", int(team_wins))
+        
+        with col2:
+            team_points = team_data['points'].sum()
+            st.metric("💰 Total Points", int(team_points))
+        
+        with col3:
+            win_rate = (team_wins / len(team_data)) * 100
+            st.metric("🎯 Win Rate", f"{win_rate:.1f}%")
+        
+        with col4:
+            seasons = team_data['year'].nunique()
+            st.metric("📅 Seasons", seasons)
+        
+        st.markdown("---")
+        
+        # Team Performance
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Championship Performance
+            points_by_year = team_data.groupby('year')['points'].sum()
+            fig = px.area(points_by_year, x=points_by_year.index, y=points_by_year.values,
+                         title=f"📈 Championship Points by Season",
+                         color_discrete_sequence=['#FF1801'])
+            fig.update_layout(template='plotly_dark', height=350)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Drivers in Team
+            team_drivers = team_data.groupby('driverRef').agg({
+                'points': 'sum',
+                'isWin': 'sum',
                 'raceId': 'count'
-            }).reset_index()
-            grid_analysis = grid_analysis[grid_analysis['grid'] <= 20]
-            grid_analysis.columns = ['Grid', 'Avg_Points', 'Races']
+            }).sort_values('points', ascending=False)
             
-            fig = px.bar(grid_analysis, x='Grid', y='Avg_Points',
-                        color='Avg_Points', color_continuous_scale='Reds',
-                        title="Average Points by Grid Position")
+            st.markdown("### 👥 Team Drivers History")
+            for driver, stats in team_drivers.head(5).iterrows():
+                st.write(f"**{driver}** - {int(stats['points'])} pts ({int(stats['isWin'])} wins)")
+
+# ============================================================================
+# ANALYTICS PAGE
+# ============================================================================
+elif page == "📈 Analytics":
+    st.markdown("""
+    <div class='main-header'>
+        <h1>ADVANCED ANALYTICS</h1>
+        <h3>Deep Dive into F1 Performance Data</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["🏁 Grid Analysis", "📊 Performance Trends", "🎯 Championship Battles"])
+    
+    with tab1:
+        st.markdown("### 🏁 Starting Grid Impact")
+        
+        grid_analysis = final_df.groupby('grid').agg({
+            'isWin': 'mean',
+            'isPodium': 'mean', 
+            'points': 'mean'
+        }).reset_index()
+        grid_analysis = grid_analysis[grid_analysis['grid'] <= 20]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig = px.line(grid_analysis, x='grid', y='isWin',
+                         title="Win Probability by Starting Position",
+                         labels={'grid': 'Grid Position', 'isWin': 'Win Probability'})
             fig.update_layout(template='plotly_dark', height=400)
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Insufficient data for advanced insights")
+        
+        with col2:
+            fig = px.scatter(grid_analysis, x='grid', y='points',
+                           title="Average Points by Grid Position",
+                           size='isPodium', color='isWin',
+                           color_continuous_scale='RdYlGn')
+            fig.update_layout(template='plotly_dark', height=400)
+            st.plotly_chart(fig, use_container_width=True)
     
-    except Exception as e:
-        st.error("Error in advanced insights")
+    with tab2:
+        st.markdown("### 📊 Historical Performance Trends")
+        
+        # DNF Analysis
+        dnf_trends = final_df.groupby('year').agg({
+            'isDNF': 'mean',
+            'raceId': 'count'
+        })
+        dnf_trends['dnf_rate'] = dnf_trends['isDNF'] * 100
+        
+        fig = px.line(dnf_trends, x=dnf_trends.index, y='dnf_rate',
+                     title="DNF Rate Trend Over Seasons",
+                     labels={'x': 'Season', 'dnf_rate': 'DNF Rate (%)'})
+        fig.update_layout(template='plotly_dark', height=400)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        st.markdown("### 🏆 Championship Analysis")
+        
+        # Current season championship
+        current_season = final_df[final_df['year'] == latest_season]
+        championship = current_season.groupby('driverRef')['points'].sum().sort_values(ascending=False).head(10)
+        
+        fig = px.bar(x=championship.values, y=championship.index, orientation='h',
+                    title=f"Current Championship Standings - {latest_season}",
+                    color=championship.values, color_continuous_scale='Viridis')
+        fig.update_layout(template='plotly_dark', height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+# ============================================================================
+# CHAMPIONSHIPS PAGE
+# ============================================================================
+elif page == "🏆 Championships":
+    st.markdown("""
+    <div class='main-header'>
+        <h1>CHAMPIONSHIP HISTORY</h1>
+        <h3>World Champions & Season Reviews</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Season selector
+    seasons = sorted(final_df['year'].unique(), reverse=True)
+    selected_season = st.selectbox("📅 SELECT SEASON", seasons)
+    
+    if selected_season:
+        season_data = final_df[final_df['year'] == selected_season]
+        
+        # Championship standings for selected season
+        standings = season_data.groupby('driverRef').agg({
+            'points': 'sum',
+            'isWin': 'sum',
+            'isPodium': 'sum',
+            'raceId': 'count'
+        }).sort_values('points', ascending=False).head(10)
+        
+        st.markdown(f"### 🏆 {selected_season} Championship Standings")
+        
+        # Display standings
+        for i, (driver, stats) in enumerate(standings.iterrows(), 1):
+            emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            with st.container():
+                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                with col1:
+                    st.write(f"**{emoji} {driver}**")
+                with col2:
+                    st.write(f"**{int(stats['points'])}** pts")
+                with col3:
+                    st.write(f"**{int(stats['isWin'])}** wins")
+                with col4:
+                    st.write(f"**{int(stats['isPodium'])}** podiums")
+            st.markdown("---")
 
 # ============================================================================
 # FOOTER
@@ -693,9 +823,10 @@ elif page == "🔮 Advanced Insights":
 st.markdown("---")
 st.markdown(
     """
-    <div style='text-align: center; color: #888;'>
-        <p>🏎️ F1 Prediction Dashboard • Powered by Machine Learning</p>
-        <p>Data Source: Ergast F1 API • Models: Neural Networks, Random Forest, Gradient Boosting</p>
+    <div style='text-align: center; color: #888; padding: 20px;'>
+        <p>🏎️ <strong>F1 Prediction Dashboard</strong> • Powered by Machine Learning • 
+        Advanced Race Analytics</p>
+        <p style='font-size: 0.8em;'>Data Source: Historical F1 Data • Models: Neural Networks, Random Forest, Gradient Boosting</p>
     </div>
     """,
     unsafe_allow_html=True
