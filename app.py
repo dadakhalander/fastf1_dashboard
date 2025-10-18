@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+# seaborn imported but not used — ok to keep for future
 import seaborn as sns
 from PIL import Image
 import joblib
@@ -59,7 +60,7 @@ st.markdown("""
 def load_all_resources():
     """Load all data and models"""
     try:
-        # Load data files
+        # Load data files (adjust paths to your setup)
         final_df = pd.read_csv("f1_dashboard.csv")
         driver_stats = pd.read_csv("driver_season_stats.csv")
         constructor_stats = pd.read_csv("constructor_season_stats.csv")
@@ -121,8 +122,40 @@ rf_winner = resources['rf_winner']
 gb_winner = resources['gb_winner']
 rf_points = resources['rf_points']
 
-# Convert date column
-final_df['raceDate'] = pd.to_datetime(final_df['raceDate'])
+# Defensive: ensure date column parsed
+if 'raceDate' in final_df.columns:
+    final_df['raceDate'] = pd.to_datetime(final_df['raceDate'], errors='coerce')
+
+# ============================================================================
+# NORMALIZE COMMON BOOLEAN / FLAG COLUMNS (defensive)
+# ============================================================================
+# Some files use 'finished' or 'isFinished' etc. Create consistent aliases used below.
+if 'isFinished' not in final_df.columns:
+    if 'finished' in final_df.columns:
+        final_df['isFinished'] = final_df['finished'].astype(int)
+    else:
+        # assume finished when positionOrder is present
+        final_df['isFinished'] = final_df.get('positionOrder').notna().astype(int)
+
+# isDNF: if explicit column exists use it, else infer from status or finished
+if 'isDNF' not in final_df.columns:
+    if 'status' in final_df.columns:
+        final_df['isDNF'] = final_df['status'].str.contains('DNF|retired|collision|accident', case=False, na=False).astype(int)
+        # If status does not include DNF terms, mark DNF when not finished
+        final_df.loc[(final_df['isDNF'] == 0) & (final_df['isFinished'] == 0), 'isDNF'] = 1
+    else:
+        final_df['isDNF'] = (final_df['isFinished'] == 0).astype(int)
+
+# isWin / isPodium normalization
+if 'isWin' not in final_df.columns:
+    final_df['isWin'] = (final_df.get('positionOrder') == 1).astype(int)
+if 'isPodium' not in final_df.columns:
+    final_df['isPodium'] = final_df.get('positionOrder').isin([1,2,3]).astype(int)
+
+# Fill missing numeric columns that are used later
+for col in ['points','grid','year','raceId','driverRef','driverId']:
+    if col not in final_df.columns:
+        final_df[col] = np.nan
 
 # ============================================================================
 # SIDEBAR NAVIGATION
@@ -151,10 +184,10 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 📋 Quick Stats")
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    st.metric("Races", final_df['raceId'].nunique())
+    st.metric("Races", int(final_df['raceId'].nunique()) if 'raceId' in final_df.columns else 0)
 with col2:
-    st.metric("Drivers", final_df['driverRef'].nunique())
-st.sidebar.metric("Seasons", final_df['year'].nunique())
+    st.metric("Drivers", int(final_df['driverRef'].nunique()) if 'driverRef' in final_df.columns else 0)
+st.sidebar.metric("Seasons", int(final_df['year'].nunique()) if 'year' in final_df.columns else 0)
 
 # ============================================================================
 # HOME PAGE
@@ -173,7 +206,7 @@ if page == "🏠 Home":
         """)
     
     with col2:
-        st.metric("Latest Season", int(final_df['year'].max()))
+        st.metric("Latest Season", int(final_df['year'].max()) if 'year' in final_df.columns else "N/A")
     
     st.markdown("---")
     
@@ -217,31 +250,37 @@ if page == "🏠 Home":
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        all_wins = final_df[final_df['isWin'] == 1].groupby('driverRef').size().max()
-        st.metric("Most Wins", all_wins)
+        wins_by_driver = final_df[final_df['isWin'] == 1].groupby('driverRef').size()
+        most_wins = int(wins_by_driver.max()) if not wins_by_driver.empty else 0
+        st.metric("Most Wins", most_wins)
     
     with col2:
-        recent_year = final_df['year'].max()
-        recent_races = final_df[final_df['year'] == recent_year]['raceId'].nunique()
-        st.metric(f"Races ({int(recent_year)})", recent_races)
+        recent_year = int(final_df['year'].max()) if 'year' in final_df.columns else None
+        recent_races = int(final_df[final_df['year'] == recent_year]['raceId'].nunique()) if recent_year is not None else 0
+        st.metric(f"Races ({recent_year})", recent_races)
     
     with col3:
-        avg_points = final_df[final_df['points'] > 0]['points'].mean()
-        st.metric("Avg Points", f"{avg_points:.1f}")
+        if 'points' in final_df.columns and not final_df[final_df['points'] > 0].empty:
+            avg_points = final_df[final_df['points'] > 0]['points'].mean()
+            st.metric("Avg Points", f"{avg_points:.1f}")
+        else:
+            st.metric("Avg Points", "N/A")
     
     with col4:
-        finish_rate = (final_df['isFinished'].sum() / len(final_df) * 100)
+        finish_rate = (final_df['isFinished'].sum() / len(final_df) * 100) if len(final_df) > 0 else 0
         st.metric("Finish Rate", f"{finish_rate:.1f}%")
     
     st.markdown("---")
     st.markdown("### 🏁 Top Drivers (All Time)")
-    top_drivers = final_df[final_df['isWin'] == 1].groupby('driverRef').size().sort_values(ascending=False).head(10)
-    
-    fig = px.bar(x=top_drivers.values, y=top_drivers.index, orientation='h',
-                 color=top_drivers.values, color_continuous_scale='Reds',
-                 labels={'x': 'Wins', 'y': 'Driver'})
-    fig.update_layout(template='plotly_dark', height=400, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    top_drivers = wins_by_driver.sort_values(ascending=False).head(10)
+    if not top_drivers.empty:
+        fig = px.bar(x=top_drivers.values, y=top_drivers.index, orientation='h',
+                     color=top_drivers.values, color_continuous_scale='Reds',
+                     labels={'x': 'Wins', 'y': 'Driver'})
+        fig.update_layout(template='plotly_dark', height=400, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No win data available to show top drivers.")
 
 # ============================================================================
 # DATA ANALYSIS PAGE
@@ -253,29 +292,36 @@ elif page == "📊 Data Analysis":
     
     with tab1:
         st.subheader("Races Per Season")
-        races_by_year = final_df.groupby('year')['raceId'].nunique()
-        
-        fig = px.bar(x=races_by_year.index, y=races_by_year.values,
-                     labels={'x': 'Year', 'y': 'Number of Races'},
-                     color_discrete_sequence=['#FF1801'],
-                     title="F1 Races Per Season")
-        fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
-        st.plotly_chart(fig, use_container_width=True)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Max Races/Season", int(races_by_year.max()))
-        with col2:
-            st.metric("Min Races/Season", int(races_by_year.min()))
-        with col3:
-            st.metric("Avg Races/Season", f"{races_by_year.mean():.1f}")
+        if 'year' in final_df.columns and 'raceId' in final_df.columns:
+            races_by_year = final_df.groupby('year')['raceId'].nunique()
+            fig = px.bar(x=races_by_year.index, y=races_by_year.values,
+                         labels={'x': 'Year', 'y': 'Number of Races'},
+                         color_discrete_sequence=['#FF1801'],
+                         title="F1 Races Per Season")
+            fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Max Races/Season", int(races_by_year.max()))
+            with col2:
+                st.metric("Min Races/Season", int(races_by_year.min()))
+            with col3:
+                st.metric("Avg Races/Season", f"{races_by_year.mean():.1f}")
+        else:
+            st.info("Year or raceId column missing in dataset.")
     
     with tab2:
         st.subheader("Result Distribution (All Time)")
+        # ensure columns exist
+        wins = int(final_df['isWin'].sum()) if 'isWin' in final_df.columns else 0
+        podiums = int(final_df['isPodium'].sum()) if 'isPodium' in final_df.columns else 0
+        finishes = int(final_df['isFinished'].sum()) if 'isFinished' in final_df.columns else 0
+        dnfs = int(final_df['isDNF'].sum()) if 'isDNF' in final_df.columns else 0
+        
         results_dist = pd.DataFrame({
             'Category': ['Wins', 'Podiums', 'Finishes', 'DNF'],
-            'Count': [final_df['isWin'].sum(), final_df['isPodium'].sum(), 
-                     final_df['isFinished'].sum(), final_df['isDNF'].sum()]
+            'Count': [wins, podiums, finishes, dnfs]
         })
         
         fig = px.pie(results_dist, values='Count', names='Category',
@@ -286,54 +332,65 @@ elif page == "📊 Data Analysis":
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Wins", int(final_df['isWin'].sum()))
+            st.metric("Wins", wins)
         with col2:
-            st.metric("Podiums", int(final_df['isPodium'].sum()))
+            st.metric("Podiums", podiums)
         with col3:
-            st.metric("Finishes", int(final_df['isFinished'].sum()))
+            st.metric("Finishes", finishes)
         with col4:
-            st.metric("DNF", int(final_df['isDNF'].sum()))
+            st.metric("DNF", dnfs)
     
     with tab3:
         st.subheader("Points Distribution")
-        points_data = final_df[final_df['points'] > 0]['points'].value_counts().sort_index(ascending=False).head(15)
-        
-        fig = px.bar(x=points_data.values, y=points_data.index,
-                     orientation='h', color_discrete_sequence=['#0082FA'],
-                     labels={'x': 'Frequency', 'y': 'Points'},
-                     title="Top 15 Points Distributions")
-        fig.update_layout(template='plotly_dark', height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        if 'points' in final_df.columns:
+            points_data = final_df[final_df['points'] > 0]['points'].value_counts().sort_index(ascending=False).head(15)
+            if not points_data.empty:
+                fig = px.bar(x=points_data.values, y=points_data.index,
+                             orientation='h', color_discrete_sequence=['#0082FA'],
+                             labels={'x': 'Frequency', 'y': 'Points'},
+                             title="Top 15 Points Distributions")
+                fig.update_layout(template='plotly_dark', height=450)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No points > 0 found in dataset.")
+        else:
+            st.info("No points column found.")
     
     with tab4:
         st.subheader("DNF (Did Not Finish) Trends")
-        dnf_by_year = final_df.groupby('year').agg({
-            'isDNF': 'sum',
-            'raceId': 'count'
-        }).reset_index()
-        dnf_by_year['dnf_rate'] = (dnf_by_year['isDNF'] / dnf_by_year['raceId'] * 100)
-        
-        fig = px.line(dnf_by_year, x='year', y='dnf_rate', 
-                      markers=True, color_discrete_sequence=['#FF1801'],
-                      labels={'year': 'Year', 'dnf_rate': 'DNF Rate (%)'},
-                      title="DNF Rate Trend Over Years")
-        fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
-        st.plotly_chart(fig, use_container_width=True)
+        if 'year' in final_df.columns and 'isDNF' in final_df.columns and 'raceId' in final_df.columns:
+            dnf_by_year = final_df.groupby('year').agg({
+                'isDNF': 'sum',
+                'raceId': 'count'
+            }).reset_index()
+            dnf_by_year['dnf_rate'] = (dnf_by_year['isDNF'] / dnf_by_year['raceId'] * 100)
+            
+            fig = px.line(dnf_by_year, x='year', y='dnf_rate', 
+                          markers=True, color_discrete_sequence=['#FF1801'],
+                          labels={'year': 'Year', 'dnf_rate': 'DNF Rate (%)'},
+                          title="DNF Rate Trend Over Years")
+            fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Required columns for DNF trend are missing.")
     
     with tab5:
         st.subheader("Podium Rate by Year")
-        podium_by_year = final_df.groupby('year').agg({
-            'isPodium': 'sum',
-            'raceId': 'count'
-        }).reset_index()
-        podium_by_year['podium_rate'] = (podium_by_year['isPodium'] / podium_by_year['raceId'] * 100)
-        
-        fig = px.area(podium_by_year, x='year', y='podium_rate',
-                      color_discrete_sequence=['#C0C0C0'],
-                      labels={'year': 'Year', 'podium_rate': 'Podium Rate (%)'},
-                      title="Podium Rate Trend")
-        fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
-        st.plotly_chart(fig, use_container_width=True)
+        if 'year' in final_df.columns and 'isPodium' in final_df.columns and 'raceId' in final_df.columns:
+            podium_by_year = final_df.groupby('year').agg({
+                'isPodium': 'sum',
+                'raceId': 'count'
+            }).reset_index()
+            podium_by_year['podium_rate'] = (podium_by_year['isPodium'] / podium_by_year['raceId'] * 100)
+            
+            fig = px.area(podium_by_year, x='year', y='podium_rate',
+                          color_discrete_sequence=['#C0C0C0'],
+                          labels={'year': 'Year', 'podium_rate': 'Podium Rate (%)'},
+                          title="Podium Rate Trend")
+            fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Required columns for podium trend are missing.")
 
 # ============================================================================
 # SINGLE RACE PREDICTION
@@ -352,18 +409,18 @@ elif page == "🎯 Single Race Prediction":
         qual_position = st.number_input("🏎️ Qualifying Position", 1, 20, 6)
     
     with col3:
-        pit_stops = st.number_input("🔧 Expected Pit Stops", 0, 5, 2)
+        pit_stops = st.number_input("🔧 Expected Pit Stops", 0, 10, 2)
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        avg_lap_time = st.number_input("⏱️ Avg Lap Time (ms)", 70000, 100000, 85000)
+        avg_lap_time = st.number_input("⏱️ Avg Lap Time (ms)", 50000, 200000, 85000)
     
     with col2:
         lap_time_consistency = st.number_input("📊 Lap Time Consistency (ms)", 0, 5000, 500)
     
     with col3:
-        pit_stop_duration = st.number_input("⏸️ Avg Pit Stop Duration (s)", 15.0, 40.0, 25.0)
+        pit_stop_duration = st.number_input("⏸️ Avg Pit Stop Duration (s)", 5.0, 60.0, 25.0)
     
     col1, col2, col3 = st.columns(3)
     
@@ -374,18 +431,18 @@ elif page == "🎯 Single Race Prediction":
         driver_podiums = st.number_input("🥇 Driver Career Podiums", 0, 200, 20)
     
     with col3:
-        driver_points = st.number_input("💰 Driver Season Points", 0, 500, 100)
+        driver_points = st.number_input("💰 Driver Season Points", 0, 2000, 100)
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        constructor_wins = st.number_input("🏭 Constructor Wins", 0, 500, 50)
+        constructor_wins = st.number_input("🏭 Constructor Wins", 0, 2000, 50)
     
     with col2:
-        constructor_points = st.number_input("🏭 Constructor Points", 0, 1000, 300)
+        constructor_points = st.number_input("🏭 Constructor Points", 0, 10000, 300)
     
     with col3:
-        finish_rate = st.number_input("✅ Finish Rate (%)", 0.0, 100.0, 75.0)
+        finish_rate_input = st.number_input("✅ Finish Rate (%)", 0.0, 100.0, 75.0)
     
     # Model selection
     st.markdown("---")
@@ -400,126 +457,150 @@ elif page == "🎯 Single Race Prediction":
         use_gb = st.checkbox("⚡ Gradient Boosting", True)
     
     if st.button("🚀 PREDICT", use_container_width=True, key="predict_btn"):
-        # Create feature array (matching training features)
+        # Create feature array (match to your trained feature order)
+        # NOTE: you must ensure the features and order match scaler/feature_names used during training.
         X_new = np.array([[
-            grid_position, qual_position, grid_position - qual_position, 
-            qual_position - grid_position, avg_lap_time, lap_time_consistency, 
-            pit_stops, pit_stop_duration, 0,
-            driver_points, driver_wins, driver_podiums, finish_rate,
-            driver_points/10, 0,
-            driver_wins/2, driver_podiums/2, driver_points*0.8,
-            constructor_wins, constructor_wins, finish_rate,
-            finish_rate*0.9
-        ]])
+            grid_position,
+            qual_position,
+            grid_position - qual_position,
+            avg_lap_time,
+            lap_time_consistency,
+            pit_stops,
+            pit_stop_duration,
+            driver_wins,
+            driver_podiums,
+            driver_points,
+            constructor_wins,
+            constructor_points,
+            finish_rate_input
+        ]], dtype=float)
         
-        # Scale features
-        X_scaled = scaler.transform(X_new)
+        # Scale features (use the same scaler used during training)
+        try:
+            X_scaled = scaler.transform(X_new)
+        except Exception as e:
+            st.error(f"Failed to scale features: {e}")
+            st.stop()
         
-        # Make predictions
         predictions = {}
         
+        # Neural nets (expect scaled features)
         if use_nn:
-            pred_nn_win = nn_winner.predict(X_scaled, verbose=0)[0][0]
-            pred_nn_podium = nn_podium.predict(X_scaled, verbose=0)[0][0]
-            pred_nn_points = nn_points.predict(X_scaled, verbose=0)[0][0]
-            predictions['Neural Network'] = {
-                'win': pred_nn_win,
-                'podium': pred_nn_podium,
-                'points': pred_nn_points
-            }
+            try:
+                pred_nn_win = float(nn_winner.predict(X_scaled, verbose=0).ravel()[0])
+                pred_nn_podium = float(nn_podium.predict(X_scaled, verbose=0).ravel()[0])
+                pred_nn_points = float(nn_points.predict(X_scaled, verbose=0).ravel()[0])
+                predictions['Neural Network'] = {
+                    'win': pred_nn_win,
+                    'podium': pred_nn_podium,
+                    'points': pred_nn_points
+                }
+            except Exception as e:
+                st.error(f"NN prediction failed: {e}")
         
+        # Scikit-learn models — use scaled features (X_scaled)
         if use_rf:
-            pred_rf_win = rf_winner.predict_proba(X_new)[0][1]
-            pred_rf_points = rf_points.predict(X_new)[0]
-            predictions['Random Forest'] = {
-                'win': pred_rf_win,
-                'podium': pred_rf_win * 0.7,
-                'points': pred_rf_points
-            }
+            try:
+                # rf_winner may expose predict_proba; handle gracefully if not
+                if hasattr(rf_winner, 'predict_proba'):
+                    pred_rf_win = float(rf_winner.predict_proba(X_scaled)[0][1])
+                else:
+                    # fallback to decision function or predict
+                    pred_rf_win = float(rf_winner.predict(X_scaled)[0])
+                    # convert to probability-like if necessary (not ideal)
+                pred_rf_points = float(rf_points.predict(X_scaled)[0])
+                predictions['Random Forest'] = {
+                    'win': pred_rf_win,
+                    'podium': pred_rf_win * 0.7,
+                    'points': pred_rf_points
+                }
+            except Exception as e:
+                st.error(f"Random Forest prediction failed: {e}")
         
         if use_gb:
-            pred_gb_win = gb_winner.predict_proba(X_new)[0][1]
-            predictions['Gradient Boosting'] = {
-                'win': pred_gb_win,
-                'podium': pred_gb_win * 0.7,
-                'points': pred_gb_win * 20
-            }
+            try:
+                if hasattr(gb_winner, 'predict_proba'):
+                    pred_gb_win = float(gb_winner.predict_proba(X_scaled)[0][1])
+                else:
+                    pred_gb_win = float(gb_winner.predict(X_scaled)[0])
+                predictions['Gradient Boosting'] = {
+                    'win': pred_gb_win,
+                    'podium': pred_gb_win * 0.7,
+                    'points': pred_gb_win * 20
+                }
+            except Exception as e:
+                st.error(f"Gradient Boosting prediction failed: {e}")
         
-        # Display results
-        st.markdown("---")
-        st.markdown("## 🎯 PREDICTION RESULTS")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        # Calculate ensemble
-        ensemble_win = np.mean([predictions[m]['win'] for m in predictions])
-        ensemble_podium = np.mean([predictions[m]['podium'] for m in predictions])
-        ensemble_points = np.mean([predictions[m]['points'] for m in predictions])
-        
-        with col1:
-            st.metric("🏆 Win Probability", f"{ensemble_win:.1%}", 
-                     delta=f"{(ensemble_win-0.5)*100:+.1f}%")
-        
-        with col2:
-            st.metric("🥇 Podium Probability", f"{ensemble_podium:.1%}")
-        
-        with col3:
-            st.metric("📊 Expected Points", f"{ensemble_points:.1f}")
-        
-        # Detailed predictions
-        st.markdown("---")
-        st.markdown("## 📋 Model-by-Model Breakdown")
-        
-        df_predictions = pd.DataFrame(predictions).T
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### Prediction Scores")
-            st.dataframe(df_predictions.style.format({
-                'win': '{:.2%}',
-                'podium': '{:.2%}',
-                'points': '{:.1f}'
-            }), use_container_width=True)
-        
-        with col2:
-            st.markdown("### Confidence Levels")
-            confidence_data = {
-                'Model': list(predictions.keys()),
-                'Win%': [predictions[m]['win']*100 for m in predictions]
-            }
-            fig = px.bar(confidence_data, x='Model', y='Win%',
-                        color_discrete_sequence=['#FF1801'],
-                        title="Win Probability by Model")
-            fig.update_layout(template='plotly_dark', height=300)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Visualization
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig = go.Figure()
-            for model in predictions:
-                fig.add_trace(go.Bar(
-                    name=model,
-                    x=[model],
-                    y=[predictions[model]['win']],
-                    marker_color=['#FF1801', '#0082FA', '#FFD700'][list(predictions.keys()).index(model)]
-                ))
-            fig.update_layout(title="Win Probability Comparison", template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            fig = go.Figure()
-            for model in predictions:
-                fig.add_trace(go.Bar(
-                    name=model,
-                    x=[model],
-                    y=[predictions[model]['points']],
-                    marker_color=['#FF1801', '#0082FA', '#FFD700'][list(predictions.keys()).index(model)]
-                ))
-            fig.update_layout(title="Expected Points Comparison", template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
+        if not predictions:
+            st.warning("No model produced predictions. Check model loading / feature compatibility.")
+        else:
+            # Display ensemble metrics
+            st.markdown("---")
+            st.markdown("## 🎯 PREDICTION RESULTS")
+            col1, col2, col3 = st.columns(3)
+            
+            ensemble_win = np.mean([predictions[m]['win'] for m in predictions])
+            ensemble_podium = np.mean([predictions[m]['podium'] for m in predictions])
+            ensemble_points = np.mean([predictions[m]['points'] for m in predictions])
+            
+            with col1:
+                st.metric("🏆 Win Probability", f"{ensemble_win:.1%}", delta=f"{(ensemble_win-0.5)*100:+.1f}%")
+            with col2:
+                st.metric("🥇 Podium Probability", f"{ensemble_podium:.1%}")
+            with col3:
+                st.metric("📊 Expected Points", f"{ensemble_points:.1f}")
+            
+            # Detailed predictions
+            st.markdown("---")
+            st.markdown("## 📋 Model-by-Model Breakdown")
+            df_predictions = pd.DataFrame(predictions).T
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("### Prediction Scores")
+                st.dataframe(df_predictions.style.format({
+                    'win': '{:.2%}',
+                    'podium': '{:.2%}',
+                    'points': '{:.1f}'
+                }), use_container_width=True)
+            
+            with col2:
+                st.markdown("### Confidence Levels")
+                confidence_data = {
+                    'Model': list(predictions.keys()),
+                    'Win%': [predictions[m]['win']*100 for m in predictions]
+                }
+                fig = px.bar(confidence_data, x='Model', y='Win%',
+                            color_discrete_sequence=['#FF1801'],
+                            title="Win Probability by Model")
+                fig.update_layout(template='plotly_dark', height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # comparison plots
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = go.Figure()
+                for i, model in enumerate(predictions):
+                    fig.add_trace(go.Bar(
+                        name=model,
+                        x=[model],
+                        y=[predictions[model]['win']],
+                        marker_color=['#FF1801', '#0082FA', '#FFD700'][i % 3]
+                    ))
+                fig.update_layout(title="Win Probability Comparison", template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                fig = go.Figure()
+                for i, model in enumerate(predictions):
+                    fig.add_trace(go.Bar(
+                        name=model,
+                        x=[model],
+                        y=[predictions[model]['points']],
+                        marker_color=['#FF1801', '#0082FA', '#FFD700'][i % 3]
+                    ))
+                fig.update_layout(title="Expected Points Comparison", template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================================
 # DRIVER ANALYSIS
@@ -527,20 +608,32 @@ elif page == "🎯 Single Race Prediction":
 elif page == "👥 Driver Analysis":
     st.markdown("# 👥 Driver Performance Analysis")
     
-    driver_list = sorted(driver_stats['driver'].unique())
+    # defensive: check expected columns in driver_stats
+    if 'driver' in driver_stats.columns:
+        driver_list = sorted(driver_stats['driver'].unique())
+    elif 'driverName' in driver_stats.columns:
+        driver_list = sorted(driver_stats['driverName'].unique())
+    else:
+        st.error("Driver stats file missing expected 'driver' or 'driverName' column.")
+        driver_list = []
+    
     selected_driver = st.selectbox("🏎️ Select Driver", driver_list)
     
-    driver_data = driver_stats[driver_stats['driver'] == selected_driver].sort_values('year')
+    # support both naming conventions
+    if 'driver' in driver_stats.columns:
+        driver_data = driver_stats[driver_stats['driver'] == selected_driver].sort_values('year')
+    else:
+        driver_data = driver_stats[driver_stats['driverName'] == selected_driver].sort_values('year')
     
     if len(driver_data) > 0:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("🏆 Total Wins", int(driver_data['wins'].sum()))
+            st.metric("🏆 Total Wins", int(driver_data['wins'].sum()) if 'wins' in driver_data.columns else 0)
         with col2:
-            st.metric("🥇 Total Podiums", int(driver_data['podiums'].sum()))
+            st.metric("🥇 Total Podiums", int(driver_data['podiums'].sum()) if 'podiums' in driver_data.columns else 0)
         with col3:
-            st.metric("💰 Total Points", int(driver_data['totalPoints'].sum()))
+            st.metric("💰 Total Points", int(driver_data['totalPoints'].sum()) if 'totalPoints' in driver_data.columns else 0)
         with col4:
             st.metric("📅 Seasons", len(driver_data))
         
@@ -549,31 +642,27 @@ elif page == "👥 Driver Analysis":
         col1, col2 = st.columns(2)
         
         with col1:
-            fig = px.line(driver_data, x='year', y=['wins', 'podiums'],
-                         markers=True, color_discrete_map={
-                             'wins': '#FFD700',
-                             'podiums': '#C0C0C0'
-                         },
-                         title="Wins & Podiums Trend")
-            fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
-            st.plotly_chart(fig, use_container_width=True)
+            ycols = [c for c in ['wins','podiums'] if c in driver_data.columns]
+            if ycols:
+                fig = px.line(driver_data, x='year', y=ycols,
+                             markers=True, title="Wins & Podiums Trend")
+                fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No wins/podiums columns available for plotting.")
         
         with col2:
-            fig = px.line(driver_data, x='year', y='totalPoints',
-                         markers=True, color_discrete_sequence=['#0082FA'],
-                         title="Season Points Trend")
-            fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
-            st.plotly_chart(fig, use_container_width=True)
+            if 'totalPoints' in driver_data.columns:
+                fig = px.line(driver_data, x='year', y='totalPoints',
+                             markers=True, title="Season Points Trend")
+                fig.update_layout(template='plotly_dark', height=450, hovermode='x unified')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No totalPoints column available for plotting.")
         
         st.markdown("---")
         st.markdown("### 📊 Detailed Statistics")
-        st.dataframe(driver_data.style.format({
-            'totalPoints': '{:.0f}',
-            'avgLapTime': '{:.0f}',
-            'finishRate': '{:.1f}%',
-            'podiumRate': '{:.1f}%',
-            'avgPointsPerRace': '{:.2f}'
-        }), use_container_width=True)
+        st.dataframe(driver_data.fillna("N/A"), use_container_width=True)
 
 # ============================================================================
 # CONSTRUCTOR ANALYSIS
@@ -581,56 +670,55 @@ elif page == "👥 Driver Analysis":
 elif page == "🏭 Constructor Analysis":
     st.markdown("# 🏭 Constructor Performance Analysis")
     
-    constructor_list = sorted(constructor_stats['constructor'].unique())
+    if 'constructor' in constructor_stats.columns:
+        constructor_list = sorted(constructor_stats['constructor'].unique())
+    elif 'constructorName' in constructor_stats.columns:
+        constructor_list = sorted(constructor_stats['constructorName'].unique())
+    else:
+        st.error("Constructor stats missing expected column.")
+        constructor_list = []
+    
     selected_constructor = st.selectbox("🏭 Select Constructor", constructor_list)
     
-    const_data = constructor_stats[constructor_stats['constructor'] == selected_constructor].sort_values('year')
+    if 'constructor' in constructor_stats.columns:
+        const_data = constructor_stats[constructor_stats['constructor'] == selected_constructor].sort_values('year')
+    else:
+        const_data = constructor_stats[constructor_stats['constructorName'] == selected_constructor].sort_values('year')
     
     if len(const_data) > 0:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("🏆 Total Wins", int(const_data['wins'].sum()))
+            st.metric("🏆 Total Wins", int(const_data['wins'].sum()) if 'wins' in const_data.columns else 0)
         with col2:
-            st.metric("💰 Total Points", int(const_data['totalPoints'].sum()))
+            st.metric("💰 Total Points", int(const_data['totalPoints'].sum()) if 'totalPoints' in const_data.columns else 0)
         with col3:
-            st.metric("🎯 Avg Win Rate", f"{const_data['winRate'].mean():.1f}%")
+            st.metric("🎯 Avg Win Rate", f\"{const_data['winRate'].mean():.1f}%\" if 'winRate' in const_data.columns else "N/A")
         with col4:
             st.metric("📅 Seasons", len(const_data))
         
         st.markdown("---")
-        
         col1, col2, col3 = st.columns(3)
         
-        with col1:
-            fig = px.bar(const_data, x='year', y='totalPoints',
-                        color_discrete_sequence=['#0082FA'],
-                        title="Points by Season")
-            fig.update_layout(template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            fig = px.line(const_data, x='year', y='wins',
-                         markers=True, color_discrete_sequence=['#FFD700'],
-                         title="Wins Trend")
-            fig.update_layout(template='plotly_dark', height=400, hovermode='x unified')
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col3:
-            fig = px.line(const_data, x='year', y='finishRate',
-                         markers=True, color_discrete_sequence=['#FF1801'],
-                         title="Finish Rate Trend")
-            fig.update_layout(template='plotly_dark', height=400, hovermode='x unified')
-            st.plotly_chart(fig, use_container_width=True)
+        if 'totalPoints' in const_data.columns:
+            with col1:
+                fig = px.bar(const_data, x='year', y='totalPoints', title="Points by Season")
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        if 'wins' in const_data.columns:
+            with col2:
+                fig = px.line(const_data, x='year', y='wins', markers=True, title="Wins Trend")
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        if 'finishRate' in const_data.columns:
+            with col3:
+                fig = px.line(const_data, x='year', y='finishRate', markers=True, title="Finish Rate Trend")
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("---")
         st.markdown("### 📊 Detailed Statistics")
-        st.dataframe(const_data.style.format({
-            'totalPoints': '{:.0f}',
-            'finishRate': '{:.1f}%',
-            'winRate': '{:.1f}%',
-            'avgPointsPerRace': '{:.2f}'
-        }), use_container_width=True)
+        st.dataframe(const_data.fillna("N/A"), use_container_width=True)
 
 # ============================================================================
 # ADVANCED PREDICTIONS
@@ -642,50 +730,60 @@ elif page == "🔮 Advanced Predictions":
     
     with tab1:
         st.subheader("Grid Position Performance Analysis")
-        
-        grid_analysis = final_df.groupby('grid').agg({
-            'isWin': 'sum',
-            'isPodium': 'sum',
-            'points': 'mean',
-            'driverId': 'count'
-        }).reset_index()
-        grid_analysis.columns = ['Grid', 'Wins', 'Podiums', 'Avg_Points', 'Races']
-        grid_analysis = grid_analysis[grid_analysis['Grid'] <= 20]
-        grid_analysis['win_rate'] = (grid_analysis['Wins'] / grid_analysis['Races'] * 100)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig = px.bar(grid_analysis, x='Grid', y='win_rate',
-                        color='win_rate', color_continuous_scale='Reds',
-                        title="Win Rate by Grid Position")
-            fig.update_layout(template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            fig = px.scatter(grid_analysis, x='Grid', y='Avg_Points',
-                           size='Races', color='win_rate',
-                           color_continuous_scale='RdYlGn',
-                           title="Points vs Grid Position")
-            fig.update_layout(template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
+        if {'grid','isWin','isPodium','points','driverId'}.issubset(final_df.columns):
+            grid_analysis = final_df.groupby('grid').agg({
+                'isWin': 'sum',
+                'isPodium': 'sum',
+                'points': 'mean',
+                'driverId': 'count'
+            }).reset_index()
+            grid_analysis.columns = ['Grid', 'Wins', 'Podiums', 'Avg_Points', 'Races']
+            grid_analysis = grid_analysis[grid_analysis['Grid'] <= 20]
+            grid_analysis['win_rate'] = (grid_analysis['Wins'] / grid_analysis['Races'] * 100)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fig = px.bar(grid_analysis, x='Grid', y='win_rate',
+                            color='win_rate', color_continuous_scale='Reds',
+                            title="Win Rate by Grid Position")
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                fig = px.scatter(grid_analysis, x='Grid', y='Avg_Points',
+                               size='Races', color='win_rate',
+                               color_continuous_scale='RdYlGn',
+                               title="Points vs Grid Position")
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Required columns for grid analysis are missing (grid/isWin/isPodium/points/driverId).")
     
     with tab2:
         st.subheader("Current Driver Form Analysis")
-        
-        recent_year = final_df['year'].max()
-        driver_form = final_df[final_df['year'] == recent_year].groupby('driverRef').agg({
-            'isWin': 'sum',
-            'isPodium': 'sum',
-            'points': 'sum',
-            'raceId': 'count'
-        }).reset_index()
-        driver_form.columns = ['Driver', 'Wins', 'Podiums', 'Points', 'Races']
-        driver_form = driver_form.sort_values('Points', ascending=False).head(15)
-        
-        fig = px.bar(driver_form, x='Points', y='Driver',
-                    orientation='h', color='Points',
-                    color_continuous_scale='Viridis',
-                    title=f"Top 15 Drivers - Season {int(recent_year)}")
-        fig.update_layout(template='plotly_dark', height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        if 'year' in final_df.columns:
+            recent_year = final_df['year'].max()
+            # defensive aggregation
+            agg_cols = {}
+            if 'isWin' in final_df.columns: agg_cols['isWin'] = 'sum'
+            if 'isPodium' in final_df.columns: agg_cols['isPodium'] = 'sum'
+            agg_cols['points'] = 'sum'
+            agg_cols['raceId'] = 'count'
+            
+            driver_form = final_df[final_df['year'] == recent_year].groupby('driverRef').agg(agg_cols).reset_index()
+            driver_form.columns = ['Driver'] + [c for c in driver_form.columns if c != 'Driver'][1:]
+            # sort safely
+            if 'points' in driver_form.columns:
+                driver_form = driver_form.sort_values('points', ascending=False).head(15)
+            
+            if not driver_form.empty:
+                fig = px.bar(driver_form, x='points' if 'points' in driver_form.columns else driver_form.columns[1],
+                            y='Driver', orientation='h', color='points' if 'points' in driver_form.columns else None,
+                            title=f"Top Drivers - Season {int(recent_year)}")
+                fig.update_layout(template='plotly_dark', height=500)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No driver form data available for the recent year.")
+        else:
+            st.info("Year column missing in dataset.")
