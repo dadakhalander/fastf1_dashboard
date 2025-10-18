@@ -1,0 +1,124 @@
+{
+    "model_version": "1.0",
+    "created_date": "2025-10-18T23:05:54.749957",
+    "description": "Advanced F1 Race Prediction Models - Winner, Podium, Points",
+    "feature_names": [
+        "grid",
+        "qualPosition",
+        "gridToFinish",
+        "qualToRaceChange",
+        "avgLapTime",
+        "lapTimeConsistency",
+        "pitStopsCount",
+        "avgPitStopDuration",
+        "overtakesCount",
+        "totalPoints_driver",
+        "wins_driver",
+        "podiums_driver",
+        "finishRate_driver",
+        "avgPointsPerRace",
+        "totalOvertakes",
+        "wins_lag_1",
+        "podiums_lag_1",
+        "totalPoints_lag_1",
+        "totalPoints_constructor",
+        "wins_constructor",
+        "finishRate_constructor",
+        "finishRate_lag_1"
+    ],
+    "n_features": 22,
+    "training_data": {
+        "total_samples": 20070,
+        "test_samples": 6689,
+        "train_test_split": "20070/6689",
+        "time_series_split": true
+    },
+    "deep_learning_models": {
+        "nn_winner": {
+            "architecture": "Dense 128-64-32-16-1",
+            "activation": "relu (hidden), sigmoid (output)",
+            "layers": 5,
+            "parameters": 14721,
+            "optimizer": "Adam (lr=0.001)",
+            "loss": "binary_crossentropy",
+            "format": [
+                "h5",
+                "SavedModel"
+            ]
+        },
+        "nn_podium": {
+            "architecture": "Dense 128-64-32-16-1",
+            "activation": "relu (hidden), sigmoid (output)",
+            "layers": 5,
+            "parameters": 14721,
+            "optimizer": "Adam (lr=0.001)",
+            "loss": "binary_crossentropy",
+            "format": [
+                "h5",
+                "SavedModel"
+            ]
+        },
+        "nn_points": {
+            "architecture": "Dense 128-64-32-16-1",
+            "activation": "relu (hidden), relu (output)",
+            "layers": 5,
+            "parameters": 14593,
+            "optimizer": "Adam (lr=0.001)",
+            "loss": "mse",
+            "format": [
+                "h5",
+                "SavedModel"
+            ]
+        }
+    },
+    "sklearn_models": {
+        "rf_winner": {
+            "type": "RandomForestClassifier",
+            "n_estimators": 200,
+            "max_depth": 20,
+            "parameters": 4000
+        },
+        "gb_winner": {
+            "type": "GradientBoostingClassifier",
+            "n_estimators": 200,
+            "learning_rate": 0.1,
+            "max_depth": 7
+        },
+        "rf_points": {
+            "type": "RandomForestRegressor",
+            "n_estimators": 200,
+            "max_depth": 20
+        }
+    },
+    "model_performance": {
+        "winner_prediction": {
+            "neural_network": {
+                "accuracy": 0.9979070115114367,
+                "roc_auc": 0.9996509230977564,
+                "f1_score": 0.966183574879227
+            },
+            "random_forest": {
+                "accuracy": 0.993422036178801,
+                "roc_auc": 0.9989937707828652,
+                "f1_score": 0.8797814207650273
+            },
+            "gradient_boosting": {
+                "accuracy": 0.9994020032889819,
+                "roc_auc": 0.9999337957599194,
+                "f1_score": 0.9901960784313726
+            }
+        },
+        "points_prediction": {
+            "neural_network": {
+                "mae": 0.3609728871106139,
+                "rmse": 0.9545650740783799,
+                "r2": 0.965930611133147
+            },
+            "random_forest": {
+                "mae": 0.43721781933896725,
+                "rmse": 1.1691170423449584,
+                "r2": 0.9488943112662854
+            }
+        }
+    }
+}

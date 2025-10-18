@@ -1,0 +1,77 @@
+{
+    "timestamp": "20251018_230123",
+    "total_models": 6,
+    "models": {
+        "DEEP_LEARNING": [
+            {
+                "name": "nn_winner",
+                "task": "Race Winner Prediction (Binary Classification)",
+                "format": [
+                    "h5",
+                    "SavedModel"
+                ],
+                "files": [
+                    "nn_winner_model.h5",
+                    "nn_winner_savedmodel/"
+                ]
+            },
+            {
+                "name": "nn_podium",
+                "task": "Podium Finish Prediction (Binary Classification)",
+                "format": [
+                    "h5",
+                    "SavedModel"
+                ],
+                "files": [
+                    "nn_podium_model.h5",
+                    "nn_podium_savedmodel/"
+                ]
+            },
+            {
+                "name": "nn_points",
+                "task": "Points Prediction (Regression)",
+                "format": [
+                    "h5",
+                    "SavedModel"
+                ],
+                "files": [
+                    "nn_points_model.h5",
+                    "nn_points_savedmodel/"
+                ]
+            }
+        ],
+        "SKLEARN_MODELS": [
+            {
+                "name": "rf_winner",
+                "task": "Race Winner Prediction (RF - Fast Inference)",
+                "format": "pickle",
+                "file": "rf_winner.pkl"
+            },
+            {
+                "name": "gb_winner",
+                "task": "Race Winner Prediction (GB - High Accuracy)",
+                "format": "pickle",
+                "file": "gb_winner.pkl"
+            },
+            {
+                "name": "rf_points",
+                "task": "Points Prediction (RF - Regression)",
+                "format": "pickle",
+                "file": "rf_points.pkl"
+            }
+        ],
+        "PREPROCESSING": [
+            {
+                "name": "feature_scaler",
+                "description": "StandardScaler for feature normalization",
+                "file": "feature_scaler.pkl"
+            },
+            {
+                "name": "feature_names",
+                "description": "List of feature column names (21 features)",
+                "file": "feature_names.pkl"
+            }
+        ]
+    },
+    "directory_structure": "models/f1_models_20251018_230123/"
+}
