@@ -60,9 +60,9 @@ def load_all_resources():
     """Load all data and models"""
     try:
         # Load data files
-        final_df = pd.read_csv("data/f1_dashboard.csv")
-        driver_stats = pd.read_csv("data/driver_season_stats.csv")
-        constructor_stats = pd.read_csv("data/constructor_season_stats.csv")
+        final_df = pd.read_csv("f1_dashboard.csv")
+        driver_stats = pd.read_csv("driver_season_stats.csv")
+        constructor_stats = pd.read_csv("constructor_season_stats.csv")
         
         # Model paths
         model_base = "models/f1_models_20251018_230123"
