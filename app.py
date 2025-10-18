@@ -78,40 +78,96 @@ st.markdown("""
 # ============================================================================
 # LOAD DATA & MODELS
 # ============================================================================
+import os
+from pathlib import Path
+
 @st.cache_resource
 def load_all_resources():
-    """Load all data and models with enhanced error handling"""
+    """Load all data and models with enhanced error handling and path resolution"""
     try:
         # Load data files
         final_df = pd.read_csv("f1_dashboard.csv")
         driver_stats = pd.read_csv("driver_season_stats.csv")
         constructor_stats = pd.read_csv("constructor_season_stats.csv")
         
-        # Model paths
-        model_base = "models/f1_models_20251018_230123"
+        # Define model base path - try multiple possible locations
+        possible_paths = [
+            "models/f1_models_20251018_230123",
+            "./models/f1_models_20251018_230123", 
+            "../models/f1_models_20251018_230123",
+            "f1_models_20251018_230123"  # if in same directory
+        ]
+        
+        model_base = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                model_base = path
+                st.success(f"✅ Found models at: {path}")
+                break
+        
+        if model_base is None:
+            st.error("❌ Could not find model directory. Checked paths:")
+            for path in possible_paths:
+                st.error(f"   - {path}")
+            return None
         
         # Load scalers and feature names
-        scaler = joblib.load(f"{model_base}/scalers_encoders/feature_scaler.pkl")
-        feature_names = joblib.load(f"{model_base}/scalers_encoders/feature_names.pkl")
+        scaler_path = f"{model_base}/scalers_encoders/feature_scaler.pkl"
+        feature_names_path = f"{model_base}/scalers_encoders/feature_names.pkl"
         
-        # Load deep learning models with error handling
-        try:
-            nn_winner = keras.models.load_model(f"{model_base}/deep_learning/nn_winner_model.h5")
-            nn_podium = keras.models.load_model(f"{model_base}/deep_learning/nn_podium_model.h5")
-            nn_points = keras.models.load_model(f"{model_base}/deep_learning/nn_points_model.h5")
-        except:
-            st.warning("⚠️ Deep learning models not found. Using fallback models.")
-            nn_winner = nn_podium = nn_points = None
+        if not os.path.exists(scaler_path):
+            st.error(f"❌ Scaler not found at: {scaler_path}")
+            return None
+            
+        scaler = joblib.load(scaler_path)
+        feature_names = joblib.load(feature_names_path)
+        
+        # Load deep learning models with detailed error handling
+        nn_models = {}
+        dl_models_to_load = {
+            'nn_winner': f"{model_base}/deep_learning/nn_winner_model.h5",
+            'nn_podium': f"{model_base}/deep_learning/nn_podium_model.h5", 
+            'nn_points': f"{model_base}/deep_learning/nn_points_model.h5"
+        }
+        
+        for model_name, model_path in dl_models_to_load.items():
+            if os.path.exists(model_path):
+                try:
+                    nn_models[model_name] = keras.models.load_model(model_path)
+                    st.success(f"✅ Loaded {model_name} from {model_path}")
+                except Exception as e:
+                    st.warning(f"⚠️ Could not load {model_name}: {str(e)}")
+                    nn_models[model_name] = None
+            else:
+                st.warning(f"⚠️ Model file not found: {model_path}")
+                nn_models[model_name] = None
         
         # Load sklearn models
-        rf_winner = joblib.load(f"{model_base}/sklearn_models/rf_winner.pkl")
-        gb_winner = joblib.load(f"{model_base}/sklearn_models/gb_winner.pkl")
-        rf_points = joblib.load(f"{model_base}/sklearn_models/rf_points.pkl")
+        sklearn_models = {}
+        sk_models_to_load = {
+            'rf_winner': f"{model_base}/sklearn_models/rf_winner.pkl",
+            'gb_winner': f"{model_base}/sklearn_models/gb_winner.pkl", 
+            'rf_points': f"{model_base}/sklearn_models/rf_points.pkl"
+        }
+        
+        for model_name, model_path in sk_models_to_load.items():
+            if os.path.exists(model_path):
+                try:
+                    sklearn_models[model_name] = joblib.load(model_path)
+                    st.success(f"✅ Loaded {model_name} from {model_path}")
+                except Exception as e:
+                    st.error(f"❌ Error loading {model_name}: {str(e)}")
+                    return None
+            else:
+                st.error(f"❌ Model file not found: {model_path}")
+                return None
         
         # Load metadata
-        try:
-            metadata = joblib.load(f"{model_base}/metadata/model_metadata.pkl")
-        except:
+        metadata_path = f"{model_base}/metadata/model_metadata.pkl"
+        if os.path.exists(metadata_path):
+            metadata = joblib.load(metadata_path)
+        else:
+            st.warning("⚠️ Metadata not found, using default metadata")
             metadata = {
                 'model_versions': {'neural_network': '1.0', 'random_forest': '1.0', 'gradient_boosting': '1.0'},
                 'training_date': '2024-01-01',
@@ -124,49 +180,21 @@ def load_all_resources():
             'constructor_stats': constructor_stats,
             'scaler': scaler,
             'feature_names': feature_names,
-            'nn_winner': nn_winner,
-            'nn_podium': nn_podium,
-            'nn_points': nn_points,
-            'rf_winner': rf_winner,
-            'gb_winner': gb_winner,
-            'rf_points': rf_points,
-            'metadata': metadata
+            'nn_winner': nn_models.get('nn_winner'),
+            'nn_podium': nn_models.get('nn_podium'),
+            'nn_points': nn_models.get('nn_points'),
+            'rf_winner': sklearn_models.get('rf_winner'),
+            'gb_winner': sklearn_models.get('gb_winner'),
+            'rf_points': sklearn_models.get('rf_points'),
+            'metadata': metadata,
+            'model_base': model_base
         }
+        
     except Exception as e:
         st.error(f"❌ Error loading resources: {str(e)}")
-        st.error("📁 Make sure all data files and models are in the correct directories.")
+        import traceback
+        st.error(f"Detailed error: {traceback.format_exc()}")
         return None
-
-# Initialize session state for predictions
-if 'predictions' not in st.session_state:
-    st.session_state.predictions = {}
-if 'prediction_history' not in st.session_state:
-    st.session_state.prediction_history = []
-
-resources = load_all_resources()
-
-if resources is None:
-    st.error("⚠️ Could not load required resources. Please check the file paths and try again.")
-    st.stop()
-
-# Assign resources to variables
-final_df = resources['final_df']
-driver_stats = resources['driver_stats']
-constructor_stats = resources['constructor_stats']
-scaler = resources['scaler']
-feature_names = resources['feature_names']
-nn_winner = resources['nn_winner']
-nn_podium = resources['nn_podium']
-nn_points = resources['nn_points']
-rf_winner = resources['rf_winner']
-gb_winner = resources['gb_winner']
-rf_points = resources['rf_points']
-metadata = resources['metadata']
-
-# Convert date column and ensure proper data types
-final_df['raceDate'] = pd.to_datetime(final_df['raceDate'])
-final_df['year'] = final_df['year'].astype(int)
-
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
