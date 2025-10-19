@@ -588,4 +588,4 @@ elif page == "Championships":
             st.write(f"{int(driver_stats['isPodium'])} podiums")
 
 st.markdown("---")
-st.markdown("<div style='text-align: center; color: #888;'><p>Formula-1<p></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align: center; color: #888;'><p>Formula 1 Prediction Dashboard | Machine Learning Powered</p></div>", unsafe_allow_html=True)
