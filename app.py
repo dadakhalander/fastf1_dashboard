@@ -8,7 +8,6 @@ from tensorflow import keras
 from datetime import datetime
 import warnings
 import os
-import uuid
 
 warnings.filterwarnings('ignore')
 
@@ -46,9 +45,13 @@ st.markdown("""
 def load_resources():
     try:
         final_df = pd.read_csv('f1_dashboard.csv')
-        driver_stats = pd.read_csv('driver_season_stats.csv', on_bad_lines='skip')
-        constructor_stats = pd.read_csv('constructor_season_stats.csv', on_bad_lines='skip')
-        clean_df = pd.read_csv('f1_dashhboard.csv')
+        driver_stats = None
+        constructor_stats = None
+        try:
+            driver_stats = pd.read_csv('driver_season_stats.csv', on_bad_lines='skip')
+            constructor_stats = pd.read_csv('constructor_season_stats.csv', on_bad_lines='skip')
+        except:
+            pass
         
         model_path = "models/f1_models_20251018_230123"
         
@@ -73,7 +76,6 @@ def load_resources():
             'final_df': final_df,
             'driver_stats': driver_stats,
             'constructor_stats': constructor_stats,
-            'clean_df': clean_df,
             'scaler': scaler,
             'rf_winner': rf_winner,
             'gb_winner': gb_winner,
@@ -92,7 +94,6 @@ if resources is None:
 final_df = resources['final_df']
 driver_stats = resources['driver_stats']
 constructor_stats = resources['constructor_stats']
-clean_df = resources['clean_df']
 scaler = resources['scaler']
 rf_winner = resources['rf_winner']
 gb_winner = resources['gb_winner']
@@ -116,26 +117,18 @@ if 'isDNF' not in final_df.columns and 'isFinished' in final_df.columns:
 if 'gridToFinish' not in final_df.columns and 'grid' in final_df.columns and 'positionOrder' in final_df.columns:
     final_df['gridToFinish'] = final_df['grid'] - final_df['positionOrder']
 
-# Preprocess clean_df to add missing columns
-if 'isWin' not in clean_df.columns and 'positionOrder' in clean_df.columns:
-    clean_df['isWin'] = (clean_df['positionOrder'] == 1).astype(int)
-if 'isPodium' not in clean_df.columns and 'positionOrder' in clean_df.columns:
-    clean_df['isPodium'] = (clean_df['positionOrder'].isin([1, 2, 3])).astype(int)
-if 'isFinished' not in clean_df.columns and 'status' in clean_df.columns:
-    clean_df['isFinished'] = clean_df['status'].apply(lambda x: 1 if x == 'Finished' or x == 1 else 0)
-
 # Check for critical columns in final_df
-required_columns = ['driverRef', 'constructorRef', 'year', 'raceId', 'points', 'grid', 'isWin', 'isPodium', 'isFinished', 'finishRate']
+required_columns = ['driverRef', 'constructorRef', 'year', 'raceId', 'points', 'grid']
 missing_columns = [col for col in required_columns if col not in final_df.columns]
 if missing_columns:
     st.error(f"Critical columns missing from f1_dashboard.csv: {missing_columns}. Please check the data source.")
     st.stop()
 
-# Check for critical columns in clean_df
-required_clean_columns = ['driverRef', 'constructorRef', 'year', 'circuitName', 'points']
-missing_clean_columns = [col for col in required_clean_columns if col not in clean_df.columns]
-if missing_clean_columns:
-    st.error(f"Critical columns missing from f1_clean.csv: {missing_clean_columns}. Please check the data source.")
+# Check for EDA-specific columns
+eda_required_columns = ['driverRef', 'constructorRef', 'year', 'points']
+eda_missing_columns = [col for col in eda_required_columns if col not in final_df.columns]
+if eda_missing_columns:
+    st.error(f"EDA page cannot function. Missing columns in f1_dashboard.csv: {eda_missing_columns}.")
     st.stop()
 
 # SIDEBAR NAVIGATION
@@ -192,24 +185,27 @@ if page == "Dashboard":
     with col1:
         st.metric("Total Races", final_df['raceId'].nunique())
     with col2:
-        st.metric("Career Wins", int(final_df['isWin'].sum()))
+        st.metric("Career Wins", int(final_df['isWin'].sum()) if 'isWin' in final_df.columns else 0)
     with col3:
-        st.metric("Podium Finishes", int(final_df['isPodium'].sum()))
+        st.metric("Podium Finishes", int(final_df['isPodium'].sum()) if 'isPodium' in final_df.columns else 0)
     with col4:
-        finish_rate = (final_df['isFinished'].sum() / len(final_df)) * 100
-        st.metric("Finish Rate", f"{finish_rate:.1f}%")
+        finish_rate = (final_df['isFinished'].sum() / len(final_df)) * 100 if 'isFinished' in final_df.columns else 0
+        st.metric("Finish Rate", f"{finish_rate:.1f}%" if finish_rate > 0 else "N/A")
     
     st.markdown("---")
     
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("All-Time Top Winners")
-        top_drivers = final_df.groupby('driverRef')['isWin'].sum().sort_values(ascending=False).head(10)
-        fig = px.bar(x=top_drivers.values, y=top_drivers.index, orientation='h',
-                     color=top_drivers.values, color_continuous_scale='Reds',
-                     title="Drivers with Most Wins")
-        fig.update_layout(template='plotly_dark', height=400, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        if 'isWin' in final_df.columns:
+            top_drivers = final_df.groupby('driverRef')['isWin'].sum().sort_values(ascending=False).head(10)
+            fig = px.bar(x=top_drivers.values, y=top_drivers.index, orientation='h',
+                         color=top_drivers.values, color_continuous_scale='Reds',
+                         title="Drivers with Most Wins")
+            fig.update_layout(template='plotly_dark', height=400, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Cannot display top winners: 'isWin' column missing.")
     
     with col2:
         st.subheader("Number of Races Per Season")
@@ -232,15 +228,19 @@ elif page == "EDA":
     st.title("📊 Exploratory Data Analysis")
     st.markdown("Use the filters below to explore performance across seasons, drivers, and circuits.")
     
+    if 'circuitName' not in final_df.columns:
+        st.error("The 'circuitName' column is missing from f1_dashboard.csv. The EDA page requires circuit information.")
+        st.stop()
+    
     col1, col2, col3 = st.columns(3)
     with col1:
-        selected_year = st.selectbox("Select Year", sorted(clean_df["year"].unique()), index=len(clean_df["year"].unique())-1)
+        selected_year = st.selectbox("Select Year", sorted(final_df["year"].unique()), index=len(final_df["year"].unique())-1)
     with col2:
-        selected_circuit = st.selectbox("Select Circuit", sorted(clean_df["circuitName"].dropna().unique()))
+        selected_circuit = st.selectbox("Select Circuit", sorted(final_df["circuitName"].dropna().unique()))
     with col3:
-        selected_driver = st.selectbox("Select Driver", sorted(clean_df["driverRef"].dropna().unique()))
+        selected_driver = st.selectbox("Select Driver", sorted(final_df["driverRef"].dropna().unique()))
     
-    filtered_df = clean_df[(clean_df["year"] == selected_year) & (clean_df["circuitName"] == selected_circuit)]
+    filtered_df = final_df[(final_df["year"] == selected_year) & (final_df["circuitName"] == selected_circuit)]
     
     st.markdown(f"### {selected_driver}'s Performance at {selected_circuit} ({selected_year})")
     
@@ -254,19 +254,27 @@ elif page == "EDA":
     else:
         st.warning("No lap time data available for this driver and race.")
     
-    fig2 = px.box(clean_df[clean_df["driverRef"] == selected_driver], x="year", y="positionOrder",
-                  color="constructorRef", title=f"Race Position Distribution for {selected_driver}")
-    fig2.update_layout(template='plotly_dark')
-    st.plotly_chart(fig2, use_container_width=True)
+    if 'positionOrder' in final_df.columns:
+        fig2 = px.box(final_df[final_df["driverRef"] == selected_driver], x="year", y="positionOrder",
+                      color="constructorRef", title=f"Race Position Distribution for {selected_driver}")
+        fig2.update_layout(template='plotly_dark')
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.warning("Cannot display position distribution: 'positionOrder' column missing.")
     
-    fig3 = px.bar(clean_df[clean_df["year"] == selected_year], x="constructorRef", y="points",
+    fig3 = px.bar(final_df[final_df["year"] == selected_year], x="constructorRef", y="points",
                   color="constructorRef", barmode="group",
                   title=f"Constructor Points in {selected_year}")
     fig3.update_layout(template='plotly_dark')
     st.plotly_chart(fig3, use_container_width=True)
     
     st.markdown("### 📈 Summary Statistics")
-    stats = clean_df.groupby("constructorRef")[["points", "pitStops", "laps"]].mean().round(2)
+    agg_columns = ['points']
+    if 'pitStops' in final_df.columns:
+        agg_columns.append('pitStops')
+    if 'laps' in final_df.columns:
+        agg_columns.append('laps')
+    stats = final_df.groupby("constructorRef")[agg_columns].mean().round(2)
     st.dataframe(stats, use_container_width=True)
 
 # RACE PREDICTOR PAGE
@@ -400,9 +408,9 @@ elif page == "Driver Analysis":
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Wins", int(driver_info['isWin'].sum()))
+            st.metric("Total Wins", int(driver_info['isWin'].sum()) if 'isWin' in driver_info.columns else 0)
         with col2:
-            st.metric("Podium Finishes", int(driver_info['isPodium'].sum()))
+            st.metric("Podium Finishes", int(driver_info['isPodium'].sum()) if 'isPodium' in driver_info.columns else 0)
         with col3:
             st.metric("Career Points", int(driver_info['points'].sum()))
         with col4:
@@ -424,14 +432,14 @@ elif page == "Driver Analysis":
         driver_performance = {
             'Wins': normalize_metric(driver_info['isWin'].sum(), 
                                    all_drivers_stats['isWin'].min(), 
-                                   all_drivers_stats['isWin'].max()),
+                                   all_drivers_stats['isWin'].max()) if 'isWin' in driver_info.columns else 0,
             'Podiums': normalize_metric(driver_info['isPodium'].sum(), 
                                       all_drivers_stats['isPodium'].min(), 
-                                      all_drivers_stats['isPodium'].max()),
+                                      all_drivers_stats['isPodium'].max()) if 'isPodium' in driver_info.columns else 0,
             'Points': normalize_metric(driver_info['points'].sum(), 
                                      all_drivers_stats['points'].min(), 
                                      all_drivers_stats['points'].max()),
-            'Reliability': driver_info['isFinished'].sum() / len(driver_info) * 100 if len(driver_info) > 0 else 0
+            'Reliability': driver_info['isFinished'].sum() / len(driver_info) * 100 if 'isFinished' in driver_info.columns and len(driver_info) > 0 else 0
         }
         if 'avgLapTime' in driver_info.columns:
             driver_performance['Speed'] = normalize_metric(driver_info['avgLapTime'].mean(), 0, 100)
@@ -449,11 +457,14 @@ elif page == "Driver Analysis":
         
         col1, col2 = st.columns(2)
         with col1:
-            wins_timeline = driver_info.groupby('year')['isWin'].sum()
-            fig = px.line(x=wins_timeline.index, y=wins_timeline.values, markers=True,
-                         title="Wins Over Years")
-            fig.update_layout(template='plotly_dark', height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            if 'isWin' in driver_info.columns:
+                wins_timeline = driver_info.groupby('year')['isWin'].sum()
+                fig = px.line(x=wins_timeline.index, y=wins_timeline.values, markers=True,
+                             title="Wins Over Years")
+                fig.update_layout(template='plotly_dark', height=350)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Cannot display wins timeline: 'isWin' column missing.")
         with col2:
             points_timeline = driver_info.groupby('year')['points'].sum()
             fig = px.bar(x=points_timeline.index, y=points_timeline.values,
@@ -477,11 +488,11 @@ elif page == "Constructor Analysis":
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Wins", int(team_info['isWin'].sum()))
+            st.metric("Total Wins", int(team_info['isWin'].sum()) if 'isWin' in team_info.columns else 0)
         with col2:
             st.metric("Career Points", int(team_info['points'].sum()))
         with col3:
-            win_percentage = (team_info['isWin'].sum() / len(team_info) * 100)
+            win_percentage = (team_info['isWin'].sum() / len(team_info) * 100) if 'isWin' in team_info.columns else 0
             st.metric("Win Rate", f"{win_percentage:.1f}%")
         with col4:
             st.metric("Seasons Active", team_info['year'].nunique())
@@ -512,42 +523,51 @@ elif page == "Advanced Analytics":
     
     with tab1:
         st.subheader("How Grid Position Affects Race Outcome")
-        grid_performance = final_df.groupby('grid').agg({
-            'isWin': lambda x: (x == 1).sum() / len(x) * 100,
-            'isPodium': lambda x: (x == 1).sum() / len(x) * 100,
-            'points': 'mean'
-        }).reset_index()
-        grid_performance = grid_performance[grid_performance['grid'] <= 15]
-        
-        col_ax = st.columns(2)
-        with col1:
-            fig = px.bar(grid_performance, x='grid', y='isWin',
-                        title="Winning Probability by Starting Position",
-                        labels={'grid': 'Grid Position', 'isWin': 'Win Rate (%)'})
-            fig.update_layout(template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            fig = px.scatter(grid_performance, x='grid', y='points', size='isPodium',
-                           color='isWin', toque_continuous_scale='RdYlGn',
-                           title="Average Points Based on Starting Position")
-            fig.update_layout(template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
+        if 'isWin' in final_df.columns and 'isPodium' in final_df.columns:
+            grid_performance = final_df.groupby('grid').agg({
+                'isWin': lambda x: (x == 1).sum() / len(x) * 100,
+                'isPodium': lambda x: (x == 1).sum() / len(x) * 100,
+                'points': 'mean'
+            }).reset_index()
+            grid_performance = grid_performance[grid_performance['grid'] <= 15]
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = px.bar(grid_performance, x='grid', y='isWin',
+                            title="Winning Probability by Starting Position",
+                            labels={'grid': 'Grid Position', 'isWin': 'Win Rate (%)'})
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                fig = px.scatter(grid_performance, x='grid', y='points', size='isPodium',
+                               color='isWin', color_continuous_scale='RdYlGn',
+                               title="Average Points Based on Starting Position")
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Cannot display grid analysis: 'isWin' or 'isPodium' columns missing.")
     
     with tab2:
         st.subheader("Historical Trends in Formula 1")
         col1, col2 = st.columns(2)
         with col1:
-            dnf_rate = final_df.groupby('year').apply(lambda x: (x['isDNF'] == 1).sum() / len(x) * 100)
-            fig = px.line(x=dnf_rate.index, y=dnf_rate.values, markers=True,
-                         title="Did Not Finish Rate Over Time", labels={'x': 'Year', 'y': 'DNF Rate (%)'})
-            fig.update_layout(template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            if 'isDNF' in final_df.columns:
+                dnf_rate = final_df.groupby('year').apply(lambda x: (x['isDNF'] == 1).sum() / len(x) * 100)
+                fig = px.line(x=dnf_rate.index, y=dnf_rate.values, markers=True,
+                             title="Did Not Finish Rate Over Time", labels={'x': 'Year', 'y': 'DNF Rate (%)'})
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Cannot display DNF rate: 'isDNF' column missing.")
         with col2:
-            podium_rate = final_df.groupby('year').apply(lambda x: (x['isPodium'] == 1).sum() / len(x) * 100)
-            fig = px.area(x=podium_rate.index, y=podium_rate.values,
-                         title="Podium Finish Rate Over Time", labels={'x': 'Year', 'y': 'Podium Rate (%)'})
-            fig.update_layout(template='plotly_dark', height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            if 'isPodium' in final_df.columns:
+                podium_rate = final_df.groupby('year').apply(lambda x: (x['isPodium'] == 1).sum() / len(x) * 100)
+                fig = px.area(x=podium_rate.index, y=podium_rate.values,
+                             title="Podium Finish Rate Over Time", labels={'x': 'Year', 'y': 'Podium Rate (%)'})
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Cannot display podium rate: 'isPodium' column missing.")
     
     with tab3:
         st.subheader("Compare Two Drivers")
@@ -565,18 +585,18 @@ elif page == "Advanced Analytics":
             comparison_table = pd.DataFrame({
                 'Statistic': ['Career Wins', 'Podium Finishes', 'Total Points', 'Average Starting Position', 'Finish Rate'],
                 first_driver: [
-                    int(first_data['isWin'].sum()),
-                    int(first_data['isPodium'].sum()),
+                    int(first_data['isWin'].sum()) if 'isWin' in first_data.columns else 0,
+                    int(first_data['isPodium'].sum()) if 'isPodium' in first_data.columns else 0,
                     int(first_data['points'].sum()),
                     f"{first_data['grid'].mean():.1f}",
-                    f"{(first_data['isFinished'].sum() / len(first_data) * 100):.1f}%"
+                    f"{(first_data['isFinished'].sum() / len(first_data) * 100):.1f}%" if 'isFinished' in first_data.columns else "N/A"
                 ],
                 second_driver: [
-                    int(second_data['isWin'].sum()),
-                    int(second_data['isPodium'].sum()),
+                    int(second_data['isWin'].sum()) if 'isWin' in second_data.columns else 0,
+                    int(second_data['isPodium'].sum()) if 'isPodium' in second_data.columns else 0,
                     int(second_data['points'].sum()),
                     f"{second_data['grid'].mean():.1f}",
-                    f"{(second_data['isFinished'].sum() / len(second_data) * 100):.1f}%"
+                    f"{(second_data['isFinished'].sum() / len(second_data) * 100):.1f}%" if 'isFinished' in second_data.columns else "N/A"
                 ]
             })
             st.dataframe(comparison_table, use_container_width=True)
@@ -586,15 +606,20 @@ elif page == "Advanced Analytics":
         latest_season = final_df['year'].max()
         recent_racing = final_df[final_df['year'] == latest_season]
         
-        overtakers = recent_racing[recent_racing['grid'] > 10].groupby('driverRef').agg({
-            'gridToFinish': 'mean',
-            'isWin': 'sum'
-        }).sort_values('gridToFinish')
-        
-        st.write("**Best Overtakers (Starting from position 10+):**")
-        if len(overtakers) > 0:
-            for driver, stats in overtakers.head(5).iterrows():
-                st.write(f"  {driver}: gains an average of {stats['gridToFinish']:.1f} positions")
+        if 'gridToFinish' in final_df.columns:
+            overtakers = recent_racing[recent_racing['grid'] > 10].groupby('driverRef').agg({
+                'gridToFinish': 'mean',
+                'isWin': 'sum'
+            }).sort_values('gridToFinish')
+            
+            st.write("**Best Overtakers (Starting from position 10+):**")
+            if len(overtakers) > 0:
+                for driver, stats in overtakers.head(5).iterrows():
+                    st.write(f"  {driver}: gains an average of {stats['gridToFinish']:.1f} positions")
+            else:
+                st.write("No overtaking data available for drivers starting beyond position 10.")
+        else:
+            st.warning("Cannot display overtakers: 'gridToFinish' column missing.")
 
 # CHAMPIONSHIPS PAGE
 elif page == "Championships":
@@ -622,9 +647,9 @@ elif page == "Championships":
         with col2:
             st.write(f"{int(driver_stats['points'])} points")
         with col3:
-            st.write(f"{int(driver_stats['isWin'])} wins")
+            st.write(f"{int(driver_stats['isWin']) if 'isWin' in driver_stats else 0} wins")
         with col4:
-            st.write(f"{int(driver_stats['isPodium'])} podiums")
+            st.write(f"{int(driver_stats['isPodium']) if 'isPodium' in driver_stats else 0} podiums")
 
 # CLUSTERING PAGE
 elif page == "Clustering":
