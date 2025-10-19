@@ -8,6 +8,9 @@ from tensorflow import keras
 from datetime import datetime
 import warnings
 import os
+import requests
+from PIL import Image
+import io
 
 warnings.filterwarnings('ignore')
 
@@ -37,6 +40,13 @@ st.markdown("""
         border-left: 5px solid #FF1801;
         margin: 10px 0;
     }
+    .circuit-card {
+        background: linear-gradient(135deg, #2d2d44 0%, #3d3d5c 100%);
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid #FF1801;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -47,6 +57,17 @@ def load_resources():
         final_df = pd.read_csv('f1_dashboard.csv')
         driver_stats = pd.read_csv('driver_season_stats.csv')
         constructor_stats = pd.read_csv('constructor_season_stats.csv')
+        
+        # Create circuit data if not in original dataset
+        if 'circuitRef' not in final_df.columns and 'circuitId' in final_df.columns:
+            # This is a simplified mapping - you might need to adjust based on your actual data
+            circuit_names = {
+                1: "Albert Park", 2: "Sepang", 3: "Shanghai", 4: "Sakhir", 5: "Catalunya",
+                6: "Monte Carlo", 7: "Istanbul", 8: "Montreal", 9: "Valencia", 10: "Silverstone",
+                11: "Hockenheim", 12: "Hungaroring", 13: "Spa", 14: "Monza", 15: "Marina Bay",
+                16: "Suzuka", 17: "Yeongam", 18: "Yas Marina", 19: "Interlagos", 20: "Austin"
+            }
+            final_df['circuitRef'] = final_df['circuitId'].map(circuit_names)
         
         model_path = "models/f1_models_20251018_230123"
         
@@ -90,13 +111,66 @@ nn_winner = resources['nn_winner']
 
 final_df['raceDate'] = pd.to_datetime(final_df['raceDate'])
 
+# CIRCUIT DATA AND MAPS (Sample data - you might want to expand this)
+CIRCUIT_DATA = {
+    "Albert Park": {
+        "country": "Australia",
+        "city": "Melbourne",
+        "length": 5.278,
+        "turns": 16,
+        "map_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Albert_Park_Circuit.svg/800px-Albert_Park_Circuit.svg.png"
+    },
+    "Monte Carlo": {
+        "country": "Monaco",
+        "city": "Monte Carlo",
+        "length": 3.337,
+        "turns": 19,
+        "map_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Circuit_de_Monaco.svg/800px-Circuit_de_Monaco.svg.png"
+    },
+    "Silverstone": {
+        "country": "UK",
+        "city": "Silverstone",
+        "length": 5.891,
+        "turns": 18,
+        "map_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Silverstone_Circuit.svg/800px-Silverstone_Circuit.svg.png"
+    },
+    "Monza": {
+        "country": "Italy",
+        "city": "Monza",
+        "length": 5.793,
+        "turns": 11,
+        "map_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Monza_Circuit.svg/800px-Monza_Circuit.svg.png"
+    },
+    "Spa": {
+        "country": "Belgium",
+        "city": "Spa",
+        "length": 7.004,
+        "turns": 19,
+        "map_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Circuit_de_Spa-Francorchamps.svg/800px-Circuit_de_Spa-Francorchamps.svg.png"
+    },
+    "Interlagos": {
+        "country": "Brazil",
+        "city": "São Paulo",
+        "length": 4.309,
+        "turns": 15,
+        "map_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Aut%C3%B3dromo_Jos%C3%A9_Carlos_Pace.svg/800px-Aut%C3%B3dromo_Jos%C3%A9_Carlos_Pace.svg.png"
+    },
+    "Suzuka": {
+        "country": "Japan",
+        "city": "Suzuka",
+        "length": 5.807,
+        "turns": 18,
+        "map_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Suzuka_Circuit.svg/800px-Suzuka_Circuit.svg.png"
+    }
+}
+
 # SIDEBAR NAVIGATION
 st.sidebar.title("Navigation")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Select a section:",
-    ["Dashboard", "Race Predictor", "Driver Analysis", "Constructor Analysis", "Advanced Analytics", "Championships"]
+    ["Dashboard", "Race Predictor", "Driver Analysis", "Constructor Analysis", "Circuit Analysis", "Advanced Analytics", "Championships"]
 )
 
 st.sidebar.markdown("---")
@@ -138,6 +212,44 @@ def normalize_metric(value, minimum, maximum):
         return 50
     return ((value - minimum) / (maximum - minimum)) * 100
 
+def get_circuit_winners(circuit_name):
+    """Get all winners for a specific circuit"""
+    circuit_races = final_df[final_df['circuitRef'] == circuit_name]
+    winners = circuit_races[circuit_races['isWin'] == 1]
+    return winners.groupby('driverRef').agg({
+        'isWin': 'count',
+        'year': ['min', 'max']
+    }).sort_values(('isWin', 'count'), ascending=False)
+
+def display_circuit_map(circuit_name):
+    """Display circuit map if available"""
+    if circuit_name in CIRCUIT_DATA:
+        map_url = CIRCUIT_DATA[circuit_name]['map_url']
+        try:
+            st.image(map_url, caption=f"{circuit_name} Circuit Layout", use_column_width=True)
+        except:
+            st.warning(f"Could not load circuit map for {circuit_name}")
+    else:
+        st.info(f"Circuit map not available for {circuit_name}")
+
+def get_circuit_performance_stats(circuit_name):
+    """Get performance statistics for a circuit"""
+    circuit_data = final_df[final_df['circuitRef'] == circuit_name]
+    
+    if len(circuit_data) == 0:
+        return None
+    
+    stats = {
+        'total_races': circuit_data['raceId'].nunique(),
+        'first_race': int(circuit_data['year'].min()),
+        'last_race': int(circuit_data['year'].max()),
+        'unique_winners': circuit_data[circuit_data['isWin'] == 1]['driverRef'].nunique(),
+        'most_wins_driver': circuit_data[circuit_data['isWin'] == 1]['driverRef'].value_counts().index[0] if len(circuit_data[circuit_data['isWin'] == 1]) > 0 else "N/A",
+        'most_wins_count': circuit_data[circuit_data['isWin'] == 1]['driverRef'].value_counts().iloc[0] if len(circuit_data[circuit_data['isWin'] == 1]) > 0 else 0,
+        'avg_overtakes': circuit_data['gridToFinish'].mean() if 'gridToFinish' in circuit_data.columns else 0
+    }
+    return stats
+
 # MAIN DASHBOARD
 if page == "Dashboard":
     st.title("Formula 1 Prediction Dashboard")
@@ -178,17 +290,42 @@ if page == "Dashboard":
         st.plotly_chart(fig, use_container_width=True)
     
     st.markdown("---")
+    
+    # New: Top Circuits Section
+    st.subheader("Most Popular Circuits")
+    if 'circuitRef' in final_df.columns:
+        top_circuits = final_df['circuitRef'].value_counts().head(8)
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            fig = px.bar(x=top_circuits.values, y=top_circuits.index, orientation='h',
+                        color=top_circuits.values, color_continuous_scale='Blues',
+                        title="Circuits with Most Races Hosted")
+            fig.update_layout(template='plotly_dark', height=400, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("### Circuit Stats")
+            for circuit, count in top_circuits.head(5).items():
+                st.markdown(f"""
+                <div class="circuit-card">
+                    <h4>{circuit}</h4>
+                    <p>Races: {count}</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    st.markdown("---")
     st.subheader(f"Current Season Standings - {latest_season}")
     
     season_standings = final_df[final_df['year'] == latest_season].groupby('driverRef')['points'].sum().sort_values(ascending=False).head(10)
     
     for position, (driver, points) in enumerate(season_standings.items(), 1):
         if position == 1:
-            badge = "First"
+            badge = "🥇 First"
         elif position == 2:
-            badge = "Second"
+            badge = "🥈 Second"
         elif position == 3:
-            badge = "Third"
+            badge = "🥉 Third"
         else:
             badge = f"Position {position}"
         
@@ -207,6 +344,15 @@ elif page == "Race Predictor":
         qualifying_position = st.slider("Qualifying Position", 1, 20, 3)
         planned_pit_stops = st.slider("Planned Pit Stops", 0, 5, 2)
         average_lap_time = st.number_input("Average Lap Time (milliseconds)", 80000, 120000, 90000)
+        
+        # Add circuit selection if available
+        if 'circuitRef' in final_df.columns:
+            circuits = sorted(final_df['circuitRef'].unique())
+            selected_circuit = st.selectbox("Select Circuit", circuits)
+            if selected_circuit in CIRCUIT_DATA:
+                circuit_info = CIRCUIT_DATA[selected_circuit]
+                st.write(f"**Circuit Info:** {circuit_info['city']}, {circuit_info['country']}")
+                st.write(f"**Track Length:** {circuit_info['length']} km | **Turns:** {circuit_info['turns']}")
     
     with col2:
         st.subheader("Driver Profile")
@@ -375,6 +521,28 @@ elif page == "Driver Analysis":
                         color_continuous_scale='Viridis')
             fig.update_layout(template='plotly_dark', height=350)
             st.plotly_chart(fig, use_container_width=True)
+        
+        # New: Driver's Favorite Circuits
+        if 'circuitRef' in final_df.columns:
+            st.markdown("---")
+            st.subheader(f"{selected_driver}'s Best Circuits")
+            
+            driver_circuit_wins = driver_info[driver_info['isWin'] == 1]
+            if len(driver_circuit_wins) > 0:
+                circuit_wins = driver_circuit_wins['circuitRef'].value_counts().head(5)
+                
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    fig = px.bar(x=circuit_wins.values, y=circuit_wins.index, orientation='h',
+                                title=f"Circuits where {selected_driver} has most wins",
+                                color=circuit_wins.values, color_continuous_scale='Greens')
+                    fig.update_layout(template='plotly_dark', height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    st.write("**Circuit Wins:**")
+                    for circuit, wins in circuit_wins.items():
+                        st.write(f"• {circuit}: {wins} wins")
 
 # CONSTRUCTOR ANALYSIS PAGE
 elif page == "Constructor Analysis":
@@ -419,12 +587,112 @@ elif page == "Constructor Analysis":
             fig.update_layout(template='plotly_dark', height=350)
             st.plotly_chart(fig, use_container_width=True)
 
+# NEW: CIRCUIT ANALYSIS PAGE
+elif page == "Circuit Analysis":
+    st.title("Circuit Analysis")
+    st.markdown("Explore F1 circuits, their history, and past winners")
+    
+    if 'circuitRef' not in final_df.columns:
+        st.warning("Circuit data not available in the dataset.")
+        st.stop()
+    
+    circuits = sorted(final_df['circuitRef'].unique())
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        selected_circuit = st.selectbox("Select a Circuit:", circuits)
+        st.markdown("---")
+        
+        # Circuit basic info
+        if selected_circuit in CIRCUIT_DATA:
+            circuit_info = CIRCUIT_DATA[selected_circuit]
+            st.subheader("Circuit Information")
+            st.write(f"**Location:** {circuit_info['city']}, {circuit_info['country']}")
+            st.write(f"**Track Length:** {circuit_info['length']} km")
+            st.write(f"**Number of Turns:** {circuit_info['turns']}")
+        else:
+            st.info("Additional circuit information not available")
+    
+    with col2:
+        # Circuit map
+        display_circuit_map(selected_circuit)
+    
+    st.markdown("---")
+    
+    # Circuit statistics
+    circuit_stats = get_circuit_performance_stats(selected_circuit)
+    
+    if circuit_stats:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Races", circuit_stats['total_races'])
+        with col2:
+            st.metric("First Race", circuit_stats['first_race'])
+        with col3:
+            st.metric("Last Race", circuit_stats['last_race'])
+        with col4:
+            st.metric("Unique Winners", circuit_stats['unique_winners'])
+        
+        st.markdown("---")
+        
+        # Circuit winners
+        st.subheader(f"All-Time Winners at {selected_circuit}")
+        winners_data = get_circuit_winners(selected_circuit)
+        
+        if len(winners_data) > 0:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Winners bar chart
+                winners_df = winners_data.reset_index()
+                winners_df.columns = ['Driver', 'Wins', 'First Win', 'Last Win']
+                
+                fig = px.bar(winners_df.head(10), x='Wins', y='Driver', orientation='h',
+                            title=f"Most Wins at {selected_circuit}",
+                            color='Wins', color_continuous_scale='RdYlGn')
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                st.subheader("Top Winners")
+                for i, (driver, stats) in enumerate(winners_data.head(5).iterrows()):
+                    wins_count = stats[('isWin', 'count')]
+                    first_win = int(stats[('year', 'min')])
+                    last_win = int(stats[('year', 'max')])
+                    
+                    st.markdown(f"""
+                    <div class="circuit-card">
+                        <h4>{i+1}. {driver}</h4>
+                        <p>Wins: {wins_count}</p>
+                        <p>First: {first_win} | Last: {last_win}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Recent races at this circuit
+        st.markdown("---")
+        st.subheader(f"Recent Races at {selected_circuit}")
+        
+        recent_races = final_df[final_df['circuitRef'] == selected_circuit].sort_values('year', ascending=False).head(10)
+        
+        for _, race in recent_races.iterrows():
+            winner = race['driverRef'] if race['isWin'] == 1 else "Unknown"
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col1:
+                st.write(f"**{int(race['year'])}**")
+            with col2:
+                st.write(f"Winner: **{winner}**")
+            with col3:
+                st.write(f"Grid: P{int(race['grid'])}" if 'grid' in race else "")
+            
+            st.markdown("---")
+
 # ADVANCED ANALYTICS PAGE
 elif page == "Advanced Analytics":
     st.title("Advanced Analytics")
     st.markdown("Deep dive into F1 statistics and performance analysis")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["Grid Analysis", "Historical Trends", "Driver Comparisons", "Predictive Insights"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Grid Analysis", "Historical Trends", "Driver Comparisons", "Circuit Performance", "Predictive Insights"])
     
     with tab1:
         st.subheader("How Grid Position Affects Race Outcome")
@@ -492,21 +760,56 @@ elif page == "Advanced Analytics":
                     int(first_data['isWin'].sum()),
                     int(first_data['isPodium'].sum()),
                     int(first_data['points'].sum()),
-                    f"{first_data['grid'].mean():.1f}",
-                    f"{(first_data['isFinished'].sum() / len(first_data) * 100):.1f}%"
+                    f"{first_data['grid'].mean():.1f}" if 'grid' in first_data.columns else "N/A",
+                    f"{(first_data['isFinished'].sum() / len(first_data) * 100):.1f}%" if 'isFinished' in first_data.columns and len(first_data) > 0 else "N/A"
                 ],
                 second_driver: [
                     int(second_data['isWin'].sum()),
                     int(second_data['isPodium'].sum()),
                     int(second_data['points'].sum()),
-                    f"{second_data['grid'].mean():.1f}",
-                    f"{(second_data['isFinished'].sum() / len(second_data) * 100):.1f}%"
+                    f"{second_data['grid'].mean():.1f}" if 'grid' in second_data.columns else "N/A",
+                    f"{(second_data['isFinished'].sum() / len(second_data) * 100):.1f}%" if 'isFinished' in second_data.columns and len(second_data) > 0 else "N/A"
                 ]
             })
             
             st.dataframe(comparison_table, use_container_width=True)
     
     with tab4:
+        st.subheader("Circuit Performance Analysis")
+        
+        if 'circuitRef' in final_df.columns:
+            # Circuit difficulty analysis
+            circuit_difficulty = final_df.groupby('circuitRef').agg({
+                'isDNF': 'mean',
+                'gridToFinish': 'std',
+                'isWin': 'mean'
+            }).round(3)
+            
+            circuit_difficulty.columns = ['DNF Rate', 'Overtaking Variability', 'Win Concentration']
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Most challenging circuits (highest DNF rate)
+                challenging_circuits = circuit_difficulty.nlargest(10, 'DNF Rate')
+                fig = px.bar(challenging_circuits, x='DNF Rate', y=challenging_circuits.index,
+                            title="Most Challenging Circuits (Highest DNF Rate)",
+                            color='DNF Rate', color_continuous_scale='Reds')
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Overtaking opportunities
+                overtaking_circuits = circuit_difficulty.nlargest(10, 'Overtaking Variability')
+                fig = px.bar(overtaking_circuits, x='Overtaking Variability', y=overtaking_circuits.index,
+                            title="Circuits with Most Overtaking Variability",
+                            color='Overtaking Variability', color_continuous_scale='Greens')
+                fig.update_layout(template='plotly_dark', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Circuit data not available for analysis")
+    
+    with tab5:
         st.subheader("Performance Predictions")
         
         latest_season = final_df['year'].max()
@@ -542,11 +845,11 @@ elif page == "Championships":
     
     for rank, (driver_name, driver_stats) in enumerate(final_standings.head(10).iterrows(), 1):
         if rank == 1:
-            rank_label = "Champion"
+            rank_label = "🥇 Champion"
         elif rank == 2:
-            rank_label = "Runner-up"
+            rank_label = "🥈 Runner-up"
         elif rank == 3:
-            rank_label = "Third Place"
+            rank_label = "🥉 Third Place"
         else:
             rank_label = f"Position {rank}"
         
@@ -559,6 +862,27 @@ elif page == "Championships":
             st.write(f"{int(driver_stats['isWin'])} wins")
         with col4:
             st.write(f"{int(driver_stats['isPodium'])} podiums")
+    
+    # New: Season circuit winners
+    if 'circuitRef' in final_df.columns:
+        st.markdown("---")
+        st.subheader(f"Circuit Winners - {chosen_season}")
+        
+        season_circuits = season_info[season_info['isWin'] == 1]
+        if len(season_circuits) > 0:
+            circuit_winners = season_circuits[['circuitRef', 'driverRef']].drop_duplicates()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                for _, race in circuit_winners.iterrows():
+                    st.write(f"**{race['circuitRef']}:** {race['driverRef']}")
+            with col2:
+                # Circuit wins distribution
+                wins_dist = circuit_winners['driverRef'].value_counts()
+                fig = px.pie(values=wins_dist.values, names=wins_dist.index,
+                            title=f"Win Distribution {chosen_season}")
+                fig.update_layout(template='plotly_dark', height=300)
+                st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
 st.markdown("<div style='text-align: center; color: #888;'><p>Formula 1 Prediction Dashboard | Machine Learning Powered</p></div>", unsafe_allow_html=True)
