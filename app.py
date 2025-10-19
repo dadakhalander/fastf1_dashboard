@@ -48,7 +48,7 @@ def load_resources():
         final_df = pd.read_csv('f1_dashboard.csv')
         driver_stats = pd.read_csv('driver_season_stats.csv', on_bad_lines='skip')
         constructor_stats = pd.read_csv('constructor_season_stats.csv', on_bad_lines='skip')
-        clean_df = pd.read_csv('f1_clean.csv')
+        clean_df = pd.read_csv('f1_dashhboard.csv')
         
         model_path = "models/f1_models_20251018_230123"
         
