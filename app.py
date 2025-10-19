@@ -88,7 +88,35 @@ gb_winner = resources['gb_winner']
 rf_points = resources['rf_points']
 nn_winner = resources['nn_winner']
 
+# Preprocess final_df to add missing columns
 final_df['raceDate'] = pd.to_datetime(final_df['raceDate'])
+
+# Create derived columns if they don't exist
+if 'isWin' not in final_df.columns and 'positionOrder' in final_df.columns:
+    final_df['isWin'] = (final_df['positionOrder'] == 1).astype(int)
+
+if 'isPodium' not in final_df.columns and 'positionOrder' in final_df.columns:
+    final_df['isPodium'] = (final_df['positionOrder'].isin([1, 2, 3])).astype(int)
+
+if 'isFinished' not in final_df.columns and 'status' in final_df.columns:
+    final_df['isFinished'] = final_df['status'].apply(lambda x: 1 if x == 'Finished' or x == 1 else 0)
+
+if 'finishRate' not in final_df.columns and 'isFinished' in final_df.columns:
+    finish_rates = final_df.groupby('driverRef')['isFinished'].mean() * 100
+    final_df['finishRate'] = final_df['driverRef'].map(finish_rates)
+
+if 'isDNF' not in final_df.columns and 'isFinished' in final_df.columns:
+    final_df['isDNF'] = (~final_df['isFinished'].astype(bool)).astype(int)
+
+# Debug: Show available columns (optional, can be commented out after debugging)
+# st.write("Available columns in final_df:", final_df.columns.tolist())
+
+# Check for critical columns
+required_columns = ['driverRef', 'constructorRef', 'year', 'raceId', 'points', 'grid', 'isWin', 'isPodium', 'isFinished', 'finishRate']
+missing_columns = [col for col in required_columns if col not in final_df.columns]
+if missing_columns:
+    st.error(f"Critical columns missing from dataset: {missing_columns}. Please check the data source.")
+    st.stop()
 
 # SIDEBAR NAVIGATION
 st.sidebar.title("Navigation")
@@ -317,14 +345,18 @@ elif page == "Driver Analysis":
         
         st.markdown("---")
         
-        # Calculate performance metrics
-        all_drivers_stats = final_df.groupby('driverRef').agg({
+        # Define aggregation dictionary based on available columns
+        agg_dict = {
             'isWin': 'sum',
             'isPodium': 'sum',
             'points': 'sum',
-            'avgLapTime': 'mean',
             'finishRate': 'mean'
-        })
+        }
+        if 'avgLapTime' in final_df.columns:
+            agg_dict['avgLapTime'] = 'mean'
+        
+        # Calculate performance metrics
+        all_drivers_stats = final_df.groupby('driverRef').agg(agg_dict)
         
         driver_performance = {
             'Wins': normalize_metric(driver_info['isWin'].sum(), 
@@ -336,10 +368,10 @@ elif page == "Driver Analysis":
             'Points': normalize_metric(driver_info['points'].sum(), 
                                      all_drivers_stats['points'].min(), 
                                      all_drivers_stats['points'].max()),
-            'Speed': normalize_metric(driver_info['avgLapTime'].mean() if 'avgLapTime' in driver_info.columns else 0,
-                                     0, 100),
             'Reliability': driver_info['isFinished'].sum() / len(driver_info) * 100 if len(driver_info) > 0 else 0
         }
+        if 'avgLapTime' in driver_info.columns:
+            driver_performance['Speed'] = normalize_metric(driver_info['avgLapTime'].mean(), 0, 100)
         
         col1, col2 = st.columns([1, 1])
         
